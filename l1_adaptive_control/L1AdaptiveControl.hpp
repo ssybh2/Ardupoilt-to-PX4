@@ -1,5 +1,7 @@
 #pragma once
 
+#include "GeometricController.hpp"
+
 #include <px4_platform_common/defines.h>
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/module_params.h>
@@ -59,6 +61,8 @@ void Run() override;
 
 void update_subscriptions();
 void update_internal_state();
+void update_controller_input();
+void run_geometric_controller();
 void print_debug_info();
 
 uORB::Subscription _vehicle_local_position_sub{ORB_ID(vehicle_local_position)};
@@ -78,6 +82,11 @@ bool _has_vehicle_status{false};
 
 InternalState _state{};
 bool _state_valid_for_control{false};
+
+GeometricController _geometric_controller{};
+GeometricController::Input _controller_input{};
+GeometricController::Output _geometric_output{};
+bool _geometric_update_executed{false};
 
 perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
 perf_counter_t _loop_interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME": interval")};

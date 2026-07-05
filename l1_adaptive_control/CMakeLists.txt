@@ -5,6 +5,8 @@ COMPILE_FLAGS
 SRCS
 L1AdaptiveControl.cpp
 L1AdaptiveControl.hpp
+GeometricController.cpp
+GeometricController.hpp
 DEPENDS
 px4_work_queue
 )
