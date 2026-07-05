@@ -220,9 +220,11 @@ PX4_INFO("state.velocity_ned [m/s]: vx=%.3f vy=%.3f vz=%.3f",
  (double)_state.velocity_ned[1],
  (double)_state.velocity_ned[2]);
 
-PX4_INFO("trajectory: update_executed=%d output_valid=%d",
- (int)_trajectory_update_executed,
- (int)_trajectory_output.valid);
+PX4_INFO("trajectory: update_executed=%d output_valid=%d mode=%u elapsed=%.2f s",
+		 (int)_trajectory_update_executed,
+		 (int)_trajectory_output.valid,
+		 (unsigned)_trajectory_output.mode,
+		 (double)_trajectory_output.elapsed_time_s);
 
 PX4_INFO("trajectory target_pos_ned [m]: x=%.3f y=%.3f z=%.3f",
  (double)_trajectory_output.position_ned[0],
