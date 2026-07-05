@@ -35,29 +35,50 @@ bool init();
 int print_status() override;
 
 private:
+struct InternalState {
+hrt_abstime timestamp_us{0};
+
+float position_ned[3]{0.f, 0.f, 0.f};
+float velocity_ned[3]{0.f, 0.f, 0.f};
+
+float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};
+float angular_velocity_body[3]{0.f, 0.f, 0.f};
+
+bool position_valid{false};
+bool velocity_valid{false};
+bool attitude_valid{false};
+bool angular_velocity_valid{false};
+
+bool armed{false};
+bool failsafe{false};
+uint8_t arming_state{0};
+uint8_t nav_state{0};
+};
+
 void Run() override;
 
+void update_subscriptions();
+void update_internal_state();
 void print_debug_info();
 
-// uORB subscriptions
 uORB::Subscription _vehicle_local_position_sub{ORB_ID(vehicle_local_position)};
 uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
 uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
 uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 
-// Latest copied uORB data
 vehicle_local_position_s _vehicle_local_position{};
 vehicle_attitude_s _vehicle_attitude{};
 vehicle_angular_velocity_s _vehicle_angular_velocity{};
 vehicle_status_s _vehicle_status{};
 
-// Data availability flags
 bool _has_local_position{false};
 bool _has_attitude{false};
 bool _has_angular_velocity{false};
 bool _has_vehicle_status{false};
 
-// Performance counters
+InternalState _state{};
+bool _state_valid_for_control{false};
+
 perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
 perf_counter_t _loop_interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME": interval")};
 
