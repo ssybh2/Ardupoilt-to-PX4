@@ -266,6 +266,22 @@ PX4_INFO("geometric errors: ep=[%.3f %.3f %.3f] ev=[%.3f %.3f %.3f]",
 		 (double)_geometric_output.body_z_axis_ned[1],
 		 (double)_geometric_output.body_z_axis_ned[2]);
 
+	PX4_INFO("geometric desired axes: xd=[%.3f %.3f %.3f] yd=[%.3f %.3f %.3f]",
+		 (double)_geometric_output.desired_body_x_axis_ned[0],
+		 (double)_geometric_output.desired_body_x_axis_ned[1],
+		 (double)_geometric_output.desired_body_x_axis_ned[2],
+		 (double)_geometric_output.desired_body_y_axis_ned[0],
+		 (double)_geometric_output.desired_body_y_axis_ned[1],
+		 (double)_geometric_output.desired_body_y_axis_ned[2]);
+
+	PX4_INFO("geometric desired z: zd=[%.3f %.3f %.3f] eR=[%.3f %.3f %.3f]",
+		 (double)_geometric_output.desired_body_z_axis_ned[0],
+		 (double)_geometric_output.desired_body_z_axis_ned[1],
+		 (double)_geometric_output.desired_body_z_axis_ned[2],
+		 (double)_geometric_output.rotation_error[0],
+		 (double)_geometric_output.rotation_error[1],
+		 (double)_geometric_output.rotation_error[2]);
+
 	PX4_INFO("geometric basic output: F=%.3f N M=[%.3f %.3f %.3f] Nm",
 		 (double)_geometric_output.thrust_newton,
 		 (double)_geometric_output.moment_newton_meter[0],

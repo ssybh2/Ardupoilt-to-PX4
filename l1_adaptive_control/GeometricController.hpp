@@ -10,13 +10,11 @@ public:
 struct Input {
 hrt_abstime timestamp_us{0};
 
-// Current vehicle state
-float position_ned[3]{0.f, 0.f, 0.f};              // x, y, z in NED [m]
-float velocity_ned[3]{0.f, 0.f, 0.f};              // vx, vy, vz in NED [m/s]
-float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};     // q(w, x, y, z), body FRD -> earth NED
-float angular_velocity_body[3]{0.f, 0.f, 0.f};     // p, q, r in body FRD [rad/s]
+float position_ned[3]{0.f, 0.f, 0.f};
+float velocity_ned[3]{0.f, 0.f, 0.f};
+float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};
+float angular_velocity_body[3]{0.f, 0.f, 0.f};
 
-// Target trajectory
 float target_position_ned[3]{0.f, 0.f, 0.f};
 float target_velocity_ned[3]{0.f, 0.f, 0.f};
 float target_acceleration_ned[3]{0.f, 0.f, 0.f};
@@ -36,17 +34,18 @@ uint8_t nav_state{0};
 struct Output {
 hrt_abstime timestamp_us{0};
 
-// Debug values for the basic geometric controller calculation
-float position_error_ned[3]{0.f, 0.f, 0.f};      // current position - target position
-float velocity_error_ned[3]{0.f, 0.f, 0.f};      // current velocity - target velocity
-float target_force_ned[3]{0.f, 0.f, 0.f};        // desired total force vector in NED
-float body_z_axis_ned[3]{0.f, 0.f, 1.f};         // current body z-axis expressed in NED
+float position_error_ned[3]{0.f, 0.f, 0.f};
+float velocity_error_ned[3]{0.f, 0.f, 0.f};
+float target_force_ned[3]{0.f, 0.f, 0.f};
 
-// Physical control command placeholder.
-// Current stage:
-// - thrust_newton is computed
-// - moment_newton_meter is still zero
-// - no actuator output is published
+float body_z_axis_ned[3]{0.f, 0.f, 1.f};
+
+float desired_body_x_axis_ned[3]{1.f, 0.f, 0.f};
+float desired_body_y_axis_ned[3]{0.f, 1.f, 0.f};
+float desired_body_z_axis_ned[3]{0.f, 0.f, 1.f};
+
+float rotation_error[3]{0.f, 0.f, 0.f};
+
 float thrust_newton{0.f};
 float moment_newton_meter[3]{0.f, 0.f, 0.f};
 
