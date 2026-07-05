@@ -282,6 +282,14 @@ PX4_INFO("geometric errors: ep=[%.3f %.3f %.3f] ev=[%.3f %.3f %.3f]",
 		 (double)_geometric_output.rotation_error[1],
 		 (double)_geometric_output.rotation_error[2]);
 
+	PX4_INFO("geometric angular error: ew=[%.4f %.4f %.4f] omega_d=[%.4f %.4f %.4f]",
+		 (double)_geometric_output.angular_velocity_error[0],
+		 (double)_geometric_output.angular_velocity_error[1],
+		 (double)_geometric_output.angular_velocity_error[2],
+		 (double)_geometric_output.desired_angular_velocity_body[0],
+		 (double)_geometric_output.desired_angular_velocity_body[1],
+		 (double)_geometric_output.desired_angular_velocity_body[2]);
+
 	PX4_INFO("geometric basic output: F=%.3f N M=[%.3f %.3f %.3f] Nm",
 		 (double)_geometric_output.thrust_newton,
 		 (double)_geometric_output.moment_newton_meter[0],

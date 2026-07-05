@@ -46,6 +46,11 @@ float desired_body_z_axis_ned[3]{0.f, 0.f, 1.f};
 
 float rotation_error[3]{0.f, 0.f, 0.f};
 
+// Stage: basic moment calculation.
+// Omegad is not migrated yet, so desired angular velocity is temporarily zero.
+float desired_angular_velocity_body[3]{0.f, 0.f, 0.f};
+float angular_velocity_error[3]{0.f, 0.f, 0.f};
+
 float thrust_newton{0.f};
 float moment_newton_meter[3]{0.f, 0.f, 0.f};
 
