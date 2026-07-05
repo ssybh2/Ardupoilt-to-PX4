@@ -75,18 +75,18 @@ R[2][1] = 2.0f * (y * z + w * x);
 R[2][2] = 1.0f - 2.0f * (x * x + y * y);
 }
 
-void get_matrix_column(const float R[3][3], int col, float out[3])
-{
-out[0] = R[0][col];
-out[1] = R[1][col];
-out[2] = R[2][col];
-}
-
 void set_matrix_column(float R[3][3], int col, const float v[3])
 {
 R[0][col] = v[0];
 R[1][col] = v[1];
 R[2][col] = v[2];
+}
+
+void get_matrix_column(const float R[3][3], int col, float out[3])
+{
+out[0] = R[0][col];
+out[1] = R[1][col];
+out[2] = R[2][col];
 }
 
 void compute_rotation_error(const float R[3][3], const float Rd[3][3], float eR[3])
@@ -110,6 +110,61 @@ A[i][j] = 0.5f * (RdT_R - RT_Rd);
 eR[0] = A[1][2];
 eR[1] = A[2][0];
 eR[2] = A[0][1];
+}
+
+bool unit_vec_with_derivatives(const float q[3],
+       const float q_dot[3],
+       const float q_ddot[3],
+       float u[3],
+       float u_dot[3],
+       float u_ddot[3])
+{
+const float nq2 = dot3(q, q);
+const float nq = sqrtf(nq2);
+
+if (nq < 1e-6f) {
+u[0] = 0.f;
+u[1] = 0.f;
+u[2] = 1.f;
+
+u_dot[0] = 0.f;
+u_dot[1] = 0.f;
+u_dot[2] = 0.f;
+
+u_ddot[0] = 0.f;
+u_ddot[1] = 0.f;
+u_ddot[2] = 0.f;
+
+return false;
+}
+
+const float nq3 = nq2 * nq;
+const float nq5 = nq3 * nq2;
+
+const float q_qdot = dot3(q, q_dot);
+const float qdot_qdot = dot3(q_dot, q_dot);
+const float q_qddot = dot3(q, q_ddot);
+
+for (int i = 0; i < 3; i++) {
+u[i] = q[i] / nq;
+
+// Original L1Quad:
+// u_dot = q_dot/nq - q*(q*q_dot)/nq^3
+u_dot[i] = q_dot[i] / nq
+   - q[i] * q_qdot / nq3;
+
+// Original L1Quad:
+// u_ddot = q_ddot/nq
+//          - q_dot/nq^3 * 2*(q*q_dot)
+//          - q/nq^3 * (q_dot*q_dot + q*q_ddot)
+//          + q*3/nq^5 * (q*q_dot)^2
+u_ddot[i] = q_ddot[i] / nq
+    - q_dot[i] * 2.f * q_qdot / nq3
+    - q[i] * (qdot_qdot + q_qddot) / nq3
+    + q[i] * 3.f * q_qdot * q_qdot / nq5;
+}
+
+return true;
 }
 
 }
@@ -146,8 +201,6 @@ get_matrix_column(R, 2, output.body_z_axis_ned);
 
 output.thrust_newton = -dot3(output.target_force_ned, output.body_z_axis_ned);
 
-// Acceleration error, matching the structure of the original L1Quad code:
-// a_error = e3 * g - R.colz() * F / m - targetAcc
 output.acceleration_error_ned[0] =
 -output.body_z_axis_ned[0] * output.thrust_newton / VEHICLE_MASS_KG
 - input.target_acceleration_ned[0];
@@ -161,7 +214,6 @@ GRAVITY_MSS
 - output.body_z_axis_ned[2] * output.thrust_newton / VEHICLE_MASS_KG
 - input.target_acceleration_ned[2];
 
-// target_force_dot from original L1Quad structure.
 output.target_force_dot_ned[0] =
 -KP_X * output.velocity_error_ned[0]
 -KV_X * output.acceleration_error_ned[0]
@@ -177,8 +229,6 @@ output.target_force_dot_ned[2] =
 -KV_Z * output.acceleration_error_ned[2]
 + VEHICLE_MASS_KG * input.target_jerk_ned[2];
 
-// Temporary jerk error approximation.
-// Full original j_error requires b3_dot and target_thrust_dot, which will be migrated next.
 output.jerk_error_ned[0] = -input.target_jerk_ned[0];
 output.jerk_error_ned[1] = -input.target_jerk_ned[1];
 output.jerk_error_ned[2] = -input.target_jerk_ned[2];
@@ -198,14 +248,33 @@ output.target_force_ddot_ned[2] =
 -KV_Z * output.jerk_error_ned[2]
 + VEHICLE_MASS_KG * input.target_snap_ned[2];
 
-output.desired_body_z_axis_ned[0] = -output.target_force_ned[0];
-output.desired_body_z_axis_ned[1] = -output.target_force_ned[1];
-output.desired_body_z_axis_ned[2] = -output.target_force_ned[2];
+const float minus_target_force[3] = {
+-output.target_force_ned[0],
+-output.target_force_ned[1],
+-output.target_force_ned[2]
+};
 
-if (!normalize3(output.desired_body_z_axis_ned)) {
-output.desired_body_z_axis_ned[0] = 0.f;
-output.desired_body_z_axis_ned[1] = 0.f;
-output.desired_body_z_axis_ned[2] = 1.f;
+const float minus_target_force_dot[3] = {
+-output.target_force_dot_ned[0],
+-output.target_force_dot_ned[1],
+-output.target_force_dot_ned[2]
+};
+
+const float minus_target_force_ddot[3] = {
+-output.target_force_ddot_ned[0],
+-output.target_force_ddot_ned[1],
+-output.target_force_ddot_ned[2]
+};
+
+unit_vec_with_derivatives(minus_target_force,
+  minus_target_force_dot,
+  minus_target_force_ddot,
+  output.b3c_ned,
+  output.b3c_dot_ned,
+  output.b3c_ddot_ned);
+
+for (int i = 0; i < 3; i++) {
+output.desired_body_z_axis_ned[i] = output.b3c_ned[i];
 }
 
 const float x_c_des[3] = {

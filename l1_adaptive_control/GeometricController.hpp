@@ -50,6 +50,11 @@ float desired_body_x_axis_ned[3]{1.f, 0.f, 0.f};
 float desired_body_y_axis_ned[3]{0.f, 1.f, 0.f};
 float desired_body_z_axis_ned[3]{0.f, 0.f, 1.f};
 
+// Stage: unit_vec(-target_force, -target_force_dot, -target_force_ddot)
+float b3c_ned[3]{0.f, 0.f, 1.f};
+float b3c_dot_ned[3]{0.f, 0.f, 0.f};
+float b3c_ddot_ned[3]{0.f, 0.f, 0.f};
+
 float rotation_error[3]{0.f, 0.f, 0.f};
 
 float desired_angular_velocity_body[3]{0.f, 0.f, 0.f};

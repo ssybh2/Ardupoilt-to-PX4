@@ -282,6 +282,21 @@ PX4_INFO("geometric errors: ep=[%.3f %.3f %.3f] ev=[%.3f %.3f %.3f]",
 		 (double)_geometric_output.jerk_error_ned[1],
 		 (double)_geometric_output.jerk_error_ned[2]);
 
+	PX4_INFO("geometric b3c: [%.3f %.3f %.3f]",
+		 (double)_geometric_output.b3c_ned[0],
+		 (double)_geometric_output.b3c_ned[1],
+		 (double)_geometric_output.b3c_ned[2]);
+
+	PX4_INFO("geometric b3c_dot: [%.3f %.3f %.3f]",
+		 (double)_geometric_output.b3c_dot_ned[0],
+		 (double)_geometric_output.b3c_dot_ned[1],
+		 (double)_geometric_output.b3c_dot_ned[2]);
+
+	PX4_INFO("geometric b3c_ddot: [%.3f %.3f %.3f]",
+		 (double)_geometric_output.b3c_ddot_ned[0],
+		 (double)_geometric_output.b3c_ddot_ned[1],
+		 (double)_geometric_output.b3c_ddot_ned[2]);
+
 	PX4_INFO("geometric desired axes: xd=[%.3f %.3f %.3f] yd=[%.3f %.3f %.3f]",
 		 (double)_geometric_output.desired_body_x_axis_ned[0],
 		 (double)_geometric_output.desired_body_x_axis_ned[1],
