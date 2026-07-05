@@ -55,6 +55,15 @@ float b3c_ned[3]{0.f, 0.f, 1.f};
 float b3c_dot_ned[3]{0.f, 0.f, 0.f};
 float b3c_ddot_ned[3]{0.f, 0.f, 0.f};
 
+// Stage: A2 and unit_vec(A2, A2_dot, A2_ddot)
+float a2_ned[3]{0.f, 1.f, 0.f};
+float a2_dot_ned[3]{0.f, 0.f, 0.f};
+float a2_ddot_ned[3]{0.f, 0.f, 0.f};
+
+float b2c_ned[3]{0.f, 1.f, 0.f};
+float b2c_dot_ned[3]{0.f, 0.f, 0.f};
+float b2c_ddot_ned[3]{0.f, 0.f, 0.f};
+
 float rotation_error[3]{0.f, 0.f, 0.f};
 
 float desired_angular_velocity_body[3]{0.f, 0.f, 0.f};

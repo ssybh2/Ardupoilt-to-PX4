@@ -277,24 +277,85 @@ for (int i = 0; i < 3; i++) {
 output.desired_body_z_axis_ned[i] = output.b3c_ned[i];
 }
 
+const float yaw = input.target_yaw;
+const float yaw_dot = input.target_yaw_rate;
+const float yaw_ddot = input.target_yaw_accel;
+
 const float x_c_des[3] = {
-cosf(input.target_yaw),
-sinf(input.target_yaw),
+cosf(yaw),
+sinf(yaw),
 0.f
 };
 
-cross3(output.desired_body_z_axis_ned, x_c_des, output.desired_body_y_axis_ned);
+const float x_c_des_dot[3] = {
+-sinf(yaw) * yaw_dot,
+ cosf(yaw) * yaw_dot,
+0.f
+};
 
-if (!normalize3(output.desired_body_y_axis_ned)) {
-output.desired_body_y_axis_ned[0] = 0.f;
-output.desired_body_y_axis_ned[1] = 1.f;
-output.desired_body_y_axis_ned[2] = 0.f;
+const float x_c_des_ddot[3] = {
+-cosf(yaw) * yaw_dot * yaw_dot - sinf(yaw) * yaw_ddot,
+-sinf(yaw) * yaw_dot * yaw_dot + cosf(yaw) * yaw_ddot,
+0.f
+};
+
+// Original L1Quad:
+// A2 = -hatOperator(x_c_des) * b3c
+// Since hat(a)*b = a cross b:
+// A2 = -(x_c_des cross b3c) = b3c cross x_c_des
+cross3(output.b3c_ned, x_c_des, output.a2_ned);
+
+// Original L1Quad:
+// A2_dot = -hat(x_c_dot)*b3c - hat(x_c)*b3c_dot
+//        = b3c cross x_c_dot + b3c_dot cross x_c
+float a2_dot_part1[3]{};
+float a2_dot_part2[3]{};
+cross3(output.b3c_ned, x_c_des_dot, a2_dot_part1);
+cross3(output.b3c_dot_ned, x_c_des, a2_dot_part2);
+
+for (int i = 0; i < 3; i++) {
+output.a2_dot_ned[i] = a2_dot_part1[i] + a2_dot_part2[i];
 }
 
+// Original L1Quad:
+// A2_ddot = -hat(x_c_ddot)*b3c
+//           -2*hat(x_c_dot)*b3c_dot
+//           -hat(x_c)*b3c_ddot
+//         = b3c cross x_c_ddot
+//           +2*b3c_dot cross x_c_dot
+//           +b3c_ddot cross x_c
+float a2_ddot_part1[3]{};
+float a2_ddot_part2[3]{};
+float a2_ddot_part3[3]{};
+cross3(output.b3c_ned, x_c_des_ddot, a2_ddot_part1);
+cross3(output.b3c_dot_ned, x_c_des_dot, a2_ddot_part2);
+cross3(output.b3c_ddot_ned, x_c_des, a2_ddot_part3);
+
+for (int i = 0; i < 3; i++) {
+output.a2_ddot_ned[i] =
+a2_ddot_part1[i]
++ 2.f * a2_ddot_part2[i]
++ a2_ddot_part3[i];
+}
+
+// Original L1Quad:
+// b2cCollection = unit_vec(A2, A2_dot, A2_ddot)
+unit_vec_with_derivatives(output.a2_ned,
+  output.a2_dot_ned,
+  output.a2_ddot_ned,
+  output.b2c_ned,
+  output.b2c_dot_ned,
+  output.b2c_ddot_ned);
+
+for (int i = 0; i < 3; i++) {
+output.desired_body_y_axis_ned[i] = output.b2c_ned[i];
+}
+
+// Original L1Quad:
+// x_axis_desired = y_axis_desired cross z_axis_desired
 cross3(output.desired_body_y_axis_ned,
        output.desired_body_z_axis_ned,
        output.desired_body_x_axis_ned);
-
 if (!normalize3(output.desired_body_x_axis_ned)) {
 output.desired_body_x_axis_ned[0] = 1.f;
 output.desired_body_x_axis_ned[1] = 0.f;
