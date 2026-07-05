@@ -266,6 +266,22 @@ PX4_INFO("geometric errors: ep=[%.3f %.3f %.3f] ev=[%.3f %.3f %.3f]",
 		 (double)_geometric_output.body_z_axis_ned[1],
 		 (double)_geometric_output.body_z_axis_ned[2]);
 
+	PX4_INFO("geometric force derivatives: Fdot=[%.3f %.3f %.3f] Fddot=[%.3f %.3f %.3f]",
+		 (double)_geometric_output.target_force_dot_ned[0],
+		 (double)_geometric_output.target_force_dot_ned[1],
+		 (double)_geometric_output.target_force_dot_ned[2],
+		 (double)_geometric_output.target_force_ddot_ned[0],
+		 (double)_geometric_output.target_force_ddot_ned[1],
+		 (double)_geometric_output.target_force_ddot_ned[2]);
+
+	PX4_INFO("geometric acc/jerk error: ae=[%.3f %.3f %.3f] je=[%.3f %.3f %.3f]",
+		 (double)_geometric_output.acceleration_error_ned[0],
+		 (double)_geometric_output.acceleration_error_ned[1],
+		 (double)_geometric_output.acceleration_error_ned[2],
+		 (double)_geometric_output.jerk_error_ned[0],
+		 (double)_geometric_output.jerk_error_ned[1],
+		 (double)_geometric_output.jerk_error_ned[2]);
+
 	PX4_INFO("geometric desired axes: xd=[%.3f %.3f %.3f] yd=[%.3f %.3f %.3f]",
 		 (double)_geometric_output.desired_body_x_axis_ned[0],
 		 (double)_geometric_output.desired_body_x_axis_ned[1],

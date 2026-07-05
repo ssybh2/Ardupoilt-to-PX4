@@ -36,7 +36,13 @@ hrt_abstime timestamp_us{0};
 
 float position_error_ned[3]{0.f, 0.f, 0.f};
 float velocity_error_ned[3]{0.f, 0.f, 0.f};
+
+float acceleration_error_ned[3]{0.f, 0.f, 0.f};
+float jerk_error_ned[3]{0.f, 0.f, 0.f};
+
 float target_force_ned[3]{0.f, 0.f, 0.f};
+float target_force_dot_ned[3]{0.f, 0.f, 0.f};
+float target_force_ddot_ned[3]{0.f, 0.f, 0.f};
 
 float body_z_axis_ned[3]{0.f, 0.f, 1.f};
 

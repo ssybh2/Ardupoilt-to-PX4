@@ -16,8 +16,6 @@ static constexpr float KV_X = 3.0f;
 static constexpr float KV_Y = 3.0f;
 static constexpr float KV_Z = 4.0f;
 
-// Temporary attitude gains.
-// Later these should become PX4 parameters.
 static constexpr float KR_X = 0.08f;
 static constexpr float KR_Y = 0.08f;
 static constexpr float KR_Z = 0.04f;
@@ -26,8 +24,6 @@ static constexpr float KO_X = 0.015f;
 static constexpr float KO_Y = 0.015f;
 static constexpr float KO_Z = 0.010f;
 
-// Temporary inertia values [kg*m^2].
-// Later these should become L1_JXX / L1_JYY / L1_JZZ parameters.
 static constexpr float JXX_KGM2 = 0.005f;
 static constexpr float JYY_KGM2 = 0.005f;
 static constexpr float JZZ_KGM2 = 0.009f;
@@ -146,10 +142,61 @@ VEHICLE_MASS_KG * (input.target_acceleration_ned[2] - GRAVITY_MSS)
 
 float R[3][3]{};
 quat_to_rotation_matrix_body_to_ned(input.quat_body_to_ned, R);
-
 get_matrix_column(R, 2, output.body_z_axis_ned);
 
 output.thrust_newton = -dot3(output.target_force_ned, output.body_z_axis_ned);
+
+// Acceleration error, matching the structure of the original L1Quad code:
+// a_error = e3 * g - R.colz() * F / m - targetAcc
+output.acceleration_error_ned[0] =
+-output.body_z_axis_ned[0] * output.thrust_newton / VEHICLE_MASS_KG
+- input.target_acceleration_ned[0];
+
+output.acceleration_error_ned[1] =
+-output.body_z_axis_ned[1] * output.thrust_newton / VEHICLE_MASS_KG
+- input.target_acceleration_ned[1];
+
+output.acceleration_error_ned[2] =
+GRAVITY_MSS
+- output.body_z_axis_ned[2] * output.thrust_newton / VEHICLE_MASS_KG
+- input.target_acceleration_ned[2];
+
+// target_force_dot from original L1Quad structure.
+output.target_force_dot_ned[0] =
+-KP_X * output.velocity_error_ned[0]
+-KV_X * output.acceleration_error_ned[0]
++ VEHICLE_MASS_KG * input.target_jerk_ned[0];
+
+output.target_force_dot_ned[1] =
+-KP_Y * output.velocity_error_ned[1]
+-KV_Y * output.acceleration_error_ned[1]
++ VEHICLE_MASS_KG * input.target_jerk_ned[1];
+
+output.target_force_dot_ned[2] =
+-KP_Z * output.velocity_error_ned[2]
+-KV_Z * output.acceleration_error_ned[2]
++ VEHICLE_MASS_KG * input.target_jerk_ned[2];
+
+// Temporary jerk error approximation.
+// Full original j_error requires b3_dot and target_thrust_dot, which will be migrated next.
+output.jerk_error_ned[0] = -input.target_jerk_ned[0];
+output.jerk_error_ned[1] = -input.target_jerk_ned[1];
+output.jerk_error_ned[2] = -input.target_jerk_ned[2];
+
+output.target_force_ddot_ned[0] =
+-KP_X * output.acceleration_error_ned[0]
+-KV_X * output.jerk_error_ned[0]
++ VEHICLE_MASS_KG * input.target_snap_ned[0];
+
+output.target_force_ddot_ned[1] =
+-KP_Y * output.acceleration_error_ned[1]
+-KV_Y * output.jerk_error_ned[1]
++ VEHICLE_MASS_KG * input.target_snap_ned[1];
+
+output.target_force_ddot_ned[2] =
+-KP_Z * output.acceleration_error_ned[2]
+-KV_Z * output.jerk_error_ned[2]
++ VEHICLE_MASS_KG * input.target_snap_ned[2];
 
 output.desired_body_z_axis_ned[0] = -output.target_force_ned[0];
 output.desired_body_z_axis_ned[1] = -output.target_force_ned[1];
@@ -192,7 +239,6 @@ set_matrix_column(Rd, 2, output.desired_body_z_axis_ned);
 
 compute_rotation_error(R, Rd, output.rotation_error);
 
-// Omegad is not migrated yet, so desired angular velocity is temporarily zero.
 output.desired_angular_velocity_body[0] = 0.f;
 output.desired_angular_velocity_body[1] = 0.f;
 output.desired_angular_velocity_body[2] = 0.f;
@@ -202,7 +248,6 @@ output.angular_velocity_error[i] =
 input.angular_velocity_body[i] - output.desired_angular_velocity_body[i];
 }
 
-// Basic attitude PD moment.
 output.pd_moment_newton_meter[0] =
 -KR_X * output.rotation_error[0]
 -KO_X * output.angular_velocity_error[0];
@@ -215,19 +260,14 @@ output.pd_moment_newton_meter[2] =
 -KR_Z * output.rotation_error[2]
 -KO_Z * output.angular_velocity_error[2];
 
-// J * Omega for diagonal inertia.
 output.j_omega_body[0] = JXX_KGM2 * input.angular_velocity_body[0];
 output.j_omega_body[1] = JYY_KGM2 * input.angular_velocity_body[1];
 output.j_omega_body[2] = JZZ_KGM2 * input.angular_velocity_body[2];
 
-// Gyroscopic moment:
-// momentAdd = Omega cross (J * Omega)
 cross3(input.angular_velocity_body,
        output.j_omega_body,
        output.gyro_moment_newton_meter);
 
-// Current moment output:
-// M = M_PD + Omega x JOmega
 output.moment_newton_meter[0] =
 output.pd_moment_newton_meter[0] + output.gyro_moment_newton_meter[0];
 
