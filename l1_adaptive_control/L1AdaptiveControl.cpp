@@ -250,11 +250,27 @@ PX4_INFO("geometric placeholder: update_executed=%d output_valid=%d",
  (int)_geometric_update_executed,
  (int)_geometric_output.valid);
 
-PX4_INFO("geometric output placeholder: F=%.3f N M=[%.3f %.3f %.3f] Nm",
- (double)_geometric_output.thrust_newton,
- (double)_geometric_output.moment_newton_meter[0],
- (double)_geometric_output.moment_newton_meter[1],
- (double)_geometric_output.moment_newton_meter[2]);
+PX4_INFO("geometric errors: ep=[%.3f %.3f %.3f] ev=[%.3f %.3f %.3f]",
+		 (double)_geometric_output.position_error_ned[0],
+		 (double)_geometric_output.position_error_ned[1],
+		 (double)_geometric_output.position_error_ned[2],
+		 (double)_geometric_output.velocity_error_ned[0],
+		 (double)_geometric_output.velocity_error_ned[1],
+		 (double)_geometric_output.velocity_error_ned[2]);
+
+	PX4_INFO("geometric force_ned=[%.3f %.3f %.3f] body_z_ned=[%.3f %.3f %.3f]",
+		 (double)_geometric_output.target_force_ned[0],
+		 (double)_geometric_output.target_force_ned[1],
+		 (double)_geometric_output.target_force_ned[2],
+		 (double)_geometric_output.body_z_axis_ned[0],
+		 (double)_geometric_output.body_z_axis_ned[1],
+		 (double)_geometric_output.body_z_axis_ned[2]);
+
+	PX4_INFO("geometric basic output: F=%.3f N M=[%.3f %.3f %.3f] Nm",
+		 (double)_geometric_output.thrust_newton,
+		 (double)_geometric_output.moment_newton_meter[0],
+		 (double)_geometric_output.moment_newton_meter[1],
+		 (double)_geometric_output.moment_newton_meter[2]);
 }
 
 int L1AdaptiveControl::task_spawn(int argc, char *argv[])

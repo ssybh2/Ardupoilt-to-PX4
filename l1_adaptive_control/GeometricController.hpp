@@ -36,10 +36,17 @@ uint8_t nav_state{0};
 struct Output {
 hrt_abstime timestamp_us{0};
 
+// Debug values for the basic geometric controller calculation
+float position_error_ned[3]{0.f, 0.f, 0.f};      // current position - target position
+float velocity_error_ned[3]{0.f, 0.f, 0.f};      // current velocity - target velocity
+float target_force_ned[3]{0.f, 0.f, 0.f};        // desired total force vector in NED
+float body_z_axis_ned[3]{0.f, 0.f, 1.f};         // current body z-axis expressed in NED
+
 // Physical control command placeholder.
-// Later:
-// thrust_newton = F
-// moment_newton_meter = [Mx, My, Mz]
+// Current stage:
+// - thrust_newton is computed
+// - moment_newton_meter is still zero
+// - no actuator output is published
 float thrust_newton{0.f};
 float moment_newton_meter[3]{0.f, 0.f, 0.f};
 
