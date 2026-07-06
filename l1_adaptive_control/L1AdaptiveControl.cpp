@@ -558,217 +558,51 @@ void L1AdaptiveControl::publish_control_setpoints()
 
 void L1AdaptiveControl::print_debug_info()
 {
-PX4_INFO("========== L1 adaptive trajectory framework ==========");
+PX4_INFO("L1 | armed=%d failsafe=%d nav=%u valid=%d | traj=%u valid=%d t=%.1fs",
+ (int)_state.armed,
+ (int)_state.failsafe,
+ (unsigned)_state.nav_state,
+ (int)_state_valid_for_control,
+ (unsigned)_trajectory_output.mode,
+ (int)_trajectory_output.valid,
+ (double)_trajectory_output.elapsed_time_s);
 
-PX4_INFO("subscriptions: local_pos=%d attitude=%d angular_vel=%d status=%d",
+PX4_INFO("   pos=[%.2f %.2f %.2f] vel=[%.2f %.2f %.2f] target_z=%.2f target_vz=%.2f",
+ (double)_state.position_ned[0],
+ (double)_state.position_ned[1],
+ (double)_state.position_ned[2],
+ (double)_state.velocity_ned[0],
+ (double)_state.velocity_ned[1],
+ (double)_state.velocity_ned[2],
+ (double)_trajectory_output.position_ned[2],
+ (double)_trajectory_output.velocity_ned[2]);
+
+PX4_INFO("   rc_height=%d manual=%d valid=%d throttle=%.2f | subs lp/att/omega/status=%d/%d/%d/%d",
+ (int)_rc_height_control_enabled.load(),
+ (int)_has_manual_control_setpoint,
+ (int)_manual_height_control_valid,
+ (double)_manual_height_stick,
  (int)_has_local_position,
  (int)_has_attitude,
  (int)_has_angular_velocity,
  (int)_has_vehicle_status);
 
-PX4_INFO("rc height control: enabled=%d manual_valid=%d throttle=%.3f",
- (int)_rc_height_control_enabled.load(),
- (int)_manual_height_control_valid,
- (double)_manual_height_stick);
-
-PX4_INFO("state flags: pos_valid=%d vel_valid=%d",
- (int)_state.position_valid,
- (int)_state.velocity_valid);
-
-PX4_INFO("state flags: att_valid=%d omega_valid=%d valid_for_control=%d",
- (int)_state.attitude_valid,
- (int)_state.angular_velocity_valid,
- (int)_state_valid_for_control);
-
-PX4_INFO("status: armed=%d arming_state=%u nav_state=%u failsafe=%d",
- (int)_state.armed,
- (unsigned)_state.arming_state,
- (unsigned)_state.nav_state,
- (int)_state.failsafe);
-
-PX4_INFO("state.position_ned [m]: x=%.3f y=%.3f z=%.3f",
- (double)_state.position_ned[0],
- (double)_state.position_ned[1],
- (double)_state.position_ned[2]);
-
-PX4_INFO("state.velocity_ned [m/s]: vx=%.3f vy=%.3f vz=%.3f",
- (double)_state.velocity_ned[0],
- (double)_state.velocity_ned[1],
- (double)_state.velocity_ned[2]);
-
-PX4_INFO("trajectory: update_executed=%d output_valid=%d mode=%u elapsed=%.2f s",
-		 (int)_trajectory_update_executed,
-		 (int)_trajectory_output.valid,
-		 (unsigned)_trajectory_output.mode,
-		 (double)_trajectory_output.elapsed_time_s);
-
-PX4_INFO("trajectory target_pos_ned [m]: x=%.3f y=%.3f z=%.3f",
- (double)_trajectory_output.position_ned[0],
- (double)_trajectory_output.position_ned[1],
- (double)_trajectory_output.position_ned[2]);
-
-PX4_INFO("trajectory target_vel_ned [m/s]: vx=%.3f vy=%.3f vz=%.3f",
- (double)_trajectory_output.velocity_ned[0],
- (double)_trajectory_output.velocity_ned[1],
- (double)_trajectory_output.velocity_ned[2]);
-
-PX4_INFO("trajectory target_acc_ned [m/s^2]: ax=%.3f ay=%.3f az=%.3f",
- (double)_trajectory_output.acceleration_ned[0],
- (double)_trajectory_output.acceleration_ned[1],
- (double)_trajectory_output.acceleration_ned[2]);
-
-PX4_INFO("trajectory yaw: yaw=%.3f yaw_rate=%.3f yaw_accel=%.3f",
- (double)_trajectory_output.yaw,
- (double)_trajectory_output.yaw_rate,
- (double)_trajectory_output.yaw_accel);
-
-PX4_INFO("geometric controller: update_executed=%d output_valid=%d",
+PX4_INFO("   controller: traj=%d geo=%d l1=%d publish=%d count=%u",
+ (int)_trajectory_update_executed,
  (int)_geometric_update_executed,
- (int)_geometric_output.valid);
+ (int)_l1_update_executed,
+ (int)_control_setpoint_published,
+ (unsigned)_control_setpoint_publish_count);
 
-PX4_INFO("geometric errors: ep=[%.3f %.3f %.3f] ev=[%.3f %.3f %.3f]",
-		 (double)_geometric_output.position_error_ned[0],
-		 (double)_geometric_output.position_error_ned[1],
-		 (double)_geometric_output.position_error_ned[2],
-		 (double)_geometric_output.velocity_error_ned[0],
-		 (double)_geometric_output.velocity_error_ned[1],
-		 (double)_geometric_output.velocity_error_ned[2]);
-
-	PX4_INFO("geometric force_ned=[%.3f %.3f %.3f] body_z_ned=[%.3f %.3f %.3f]",
-		 (double)_geometric_output.target_force_ned[0],
-		 (double)_geometric_output.target_force_ned[1],
-		 (double)_geometric_output.target_force_ned[2],
-		 (double)_geometric_output.body_z_axis_ned[0],
-		 (double)_geometric_output.body_z_axis_ned[1],
-		 (double)_geometric_output.body_z_axis_ned[2]);
-
-	PX4_INFO("geometric force derivatives: Fdot=[%.3f %.3f %.3f] Fddot=[%.3f %.3f %.3f]",
-		 (double)_geometric_output.target_force_dot_ned[0],
-		 (double)_geometric_output.target_force_dot_ned[1],
-		 (double)_geometric_output.target_force_dot_ned[2],
-		 (double)_geometric_output.target_force_ddot_ned[0],
-		 (double)_geometric_output.target_force_ddot_ned[1],
-		 (double)_geometric_output.target_force_ddot_ned[2]);
-
-	PX4_INFO("geometric acc/jerk error: ae=[%.3f %.3f %.3f] je=[%.3f %.3f %.3f]",
-		 (double)_geometric_output.acceleration_error_ned[0],
-		 (double)_geometric_output.acceleration_error_ned[1],
-		 (double)_geometric_output.acceleration_error_ned[2],
-		 (double)_geometric_output.jerk_error_ned[0],
-		 (double)_geometric_output.jerk_error_ned[1],
-		 (double)_geometric_output.jerk_error_ned[2]);
-
-	PX4_INFO("geometric b3c: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.b3c_ned[0],
-		 (double)_geometric_output.b3c_ned[1],
-		 (double)_geometric_output.b3c_ned[2]);
-
-	PX4_INFO("geometric b3c_dot: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.b3c_dot_ned[0],
-		 (double)_geometric_output.b3c_dot_ned[1],
-		 (double)_geometric_output.b3c_dot_ned[2]);
-
-	PX4_INFO("geometric b3c_ddot: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.b3c_ddot_ned[0],
-		 (double)_geometric_output.b3c_ddot_ned[1],
-		 (double)_geometric_output.b3c_ddot_ned[2]);
-
-	PX4_INFO("geometric A2: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.a2_ned[0],
-		 (double)_geometric_output.a2_ned[1],
-		 (double)_geometric_output.a2_ned[2]);
-
-	PX4_INFO("geometric A2_dot: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.a2_dot_ned[0],
-		 (double)_geometric_output.a2_dot_ned[1],
-		 (double)_geometric_output.a2_dot_ned[2]);
-
-	PX4_INFO("geometric A2_ddot: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.a2_ddot_ned[0],
-		 (double)_geometric_output.a2_ddot_ned[1],
-		 (double)_geometric_output.a2_ddot_ned[2]);
-
-	PX4_INFO("geometric b2c: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.b2c_ned[0],
-		 (double)_geometric_output.b2c_ned[1],
-		 (double)_geometric_output.b2c_ned[2]);
-
-	PX4_INFO("geometric b2c_dot: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.b2c_dot_ned[0],
-		 (double)_geometric_output.b2c_dot_ned[1],
-		 (double)_geometric_output.b2c_dot_ned[2]);
-
-	PX4_INFO("geometric b2c_ddot: [%.3f %.3f %.3f]",
-		 (double)_geometric_output.b2c_ddot_ned[0],
-		 (double)_geometric_output.b2c_ddot_ned[1],
-		 (double)_geometric_output.b2c_ddot_ned[2]);
-
-	PX4_INFO("geometric desired axes: xd=[%.3f %.3f %.3f] yd=[%.3f %.3f %.3f]",
-		 (double)_geometric_output.desired_body_x_axis_ned[0],
-		 (double)_geometric_output.desired_body_x_axis_ned[1],
-		 (double)_geometric_output.desired_body_x_axis_ned[2],
-		 (double)_geometric_output.desired_body_y_axis_ned[0],
-		 (double)_geometric_output.desired_body_y_axis_ned[1],
-		 (double)_geometric_output.desired_body_y_axis_ned[2]);
-
-	PX4_INFO("geometric desired z: zd=[%.3f %.3f %.3f] eR=[%.3f %.3f %.3f]",
-		 (double)_geometric_output.desired_body_z_axis_ned[0],
-		 (double)_geometric_output.desired_body_z_axis_ned[1],
-		 (double)_geometric_output.desired_body_z_axis_ned[2],
-		 (double)_geometric_output.rotation_error[0],
-		 (double)_geometric_output.rotation_error[1],
-		 (double)_geometric_output.rotation_error[2]);
-
-	PX4_INFO("geometric angular error: ew=[%.4f %.4f %.4f] omega_d=[%.4f %.4f %.4f]",
-		 (double)_geometric_output.angular_velocity_error[0],
-		 (double)_geometric_output.angular_velocity_error[1],
-		 (double)_geometric_output.angular_velocity_error[2],
-		 (double)_geometric_output.desired_angular_velocity_body[0],
-		 (double)_geometric_output.desired_angular_velocity_body[1],
-		 (double)_geometric_output.desired_angular_velocity_body[2]);
-
-	PX4_INFO("geometric moment split: Mpd=[%.5f %.5f %.5f] Mgyro=[%.5f %.5f %.5f]",
-		 (double)_geometric_output.pd_moment_newton_meter[0],
-		 (double)_geometric_output.pd_moment_newton_meter[1],
-		 (double)_geometric_output.pd_moment_newton_meter[2],
-		 (double)_geometric_output.gyro_moment_newton_meter[0],
-		 (double)_geometric_output.gyro_moment_newton_meter[1],
-		 (double)_geometric_output.gyro_moment_newton_meter[2]);
-
-	PX4_INFO("geometric inertia: Jomega=[%.5f %.5f %.5f]",
-		 (double)_geometric_output.j_omega_body[0],
-		 (double)_geometric_output.j_omega_body[1],
-		 (double)_geometric_output.j_omega_body[2]);
-
-PX4_INFO("geometric basic output: F=%.3f N M=[%.3f %.3f %.3f] Nm",
-		 (double)_geometric_output.thrust_newton,
-		 (double)_geometric_output.moment_newton_meter[0],
-		 (double)_geometric_output.moment_newton_meter[1],
-		 (double)_geometric_output.moment_newton_meter[2]);
-
-	PX4_INFO("L1 adaptive: enabled=%d update=%d uad=[%.3f %.4f %.4f %.4f]",
-		 (int)L1_ENABLE,
-		 (int)_l1_update_executed,
-		 (double)_l1_output_thrust_moment[0],
-		 (double)_l1_output_thrust_moment[1],
-		 (double)_l1_output_thrust_moment[2],
-		 (double)_l1_output_thrust_moment[3]);
-
-	PX4_INFO("combined output: F=%.3f N M=[%.3f %.3f %.3f] Nm",
-		 (double)_combined_thrust_moment[0],
-		 (double)_combined_thrust_moment[1],
-		 (double)_combined_thrust_moment[2],
-		 (double)_combined_thrust_moment[3]);
-
-	PX4_INFO("published setpoint: active=%d count=%u thrust_body=[%.3f %.3f %.3f] torque=[%.3f %.3f %.3f]",
-		 (int)_control_setpoint_published,
-		 (unsigned)_control_setpoint_publish_count,
-		 (double)_published_thrust_body[0],
-		 (double)_published_thrust_body[1],
-		 (double)_published_thrust_body[2],
-		 (double)_published_torque_body[0],
-		 (double)_published_torque_body[1],
-		 (double)_published_torque_body[2]);
+PX4_INFO("   output: F=%.2fN M=[%.2f %.2f %.2f] thrust_z=%.3f torque=[%.3f %.3f %.3f]",
+ (double)_combined_thrust_moment[0],
+ (double)_combined_thrust_moment[1],
+ (double)_combined_thrust_moment[2],
+ (double)_combined_thrust_moment[3],
+ (double)_published_thrust_body[2],
+ (double)_published_torque_body[0],
+ (double)_published_torque_body[1],
+ (double)_published_torque_body[2]);
 }
 
 int L1AdaptiveControl::task_spawn(int argc, char *argv[])
@@ -796,36 +630,39 @@ return PX4_ERROR;
 
 int L1AdaptiveControl::print_status()
 {
-PX4_INFO("L1 adaptive control is running");
+PX4_INFO("L1 adaptive control");
+PX4_INFO("  state: armed=%d failsafe=%d nav=%u valid=%d",
+ (int)_state.armed,
+ (int)_state.failsafe,
+ (unsigned)_state.nav_state,
+ (int)_state_valid_for_control);
 
-PX4_INFO("has local_position=%d attitude=%d angular_velocity=%d vehicle_status=%d",
- (int)_has_local_position,
- (int)_has_attitude,
- (int)_has_angular_velocity,
- (int)_has_vehicle_status);
+PX4_INFO("  trajectory: mode=%u valid=%d target_z=%.3f target_vz=%.3f elapsed=%.2fs",
+ (unsigned)_trajectory_output.mode,
+ (int)_trajectory_output.valid,
+ (double)_trajectory_output.position_ned[2],
+ (double)_trajectory_output.velocity_ned[2],
+ (double)_trajectory_output.elapsed_time_s);
 
-PX4_INFO("rc_height_control_enabled=%d manual_control_valid=%d manual_throttle=%.3f",
+PX4_INFO("  rc height: enabled=%d received=%d valid=%d throttle=%.3f",
  (int)_rc_height_control_enabled.load(),
+ (int)_has_manual_control_setpoint,
  (int)_manual_height_control_valid,
  (double)_manual_height_stick);
 
-PX4_INFO("state_valid_for_control=%d trajectory_update=%d trajectory_valid=%d",
- (int)_state_valid_for_control,
+PX4_INFO("  pipeline: traj=%d geo=%d l1=%d publish=%d count=%u",
  (int)_trajectory_update_executed,
- (int)_trajectory_output.valid);
-
-PX4_INFO("trajectory_mode=%u target_position_ned_z=%.3f",
- (unsigned)_trajectory_output.mode,
- (double)_trajectory_output.position_ned[2]);
-
-PX4_INFO("geometric_update_executed=%d geometric_output_valid=%d",
  (int)_geometric_update_executed,
- (int)_geometric_output.valid);
-
-PX4_INFO("l1_update_executed=%d publish_active=%d publish_count=%u",
  (int)_l1_update_executed,
  (int)_control_setpoint_published,
  (unsigned)_control_setpoint_publish_count);
+
+PX4_INFO("  subscriptions: local_pos=%d attitude=%d angular_vel=%d manual=%d status=%d",
+ (int)_has_local_position,
+ (int)_has_attitude,
+ (int)_has_angular_velocity,
+ (int)_has_manual_control_setpoint,
+ (int)_has_vehicle_status);
 
 perf_print_counter(_loop_perf);
 perf_print_counter(_loop_interval_perf);
@@ -856,12 +693,15 @@ return -1;
 }
 
 if (argc < 2 || !strcmp(argv[1], "status")) {
-PX4_INFO("RC height control %s", instance->rc_height_control_enabled() ? "enabled" : "disabled");
-PX4_INFO("manual_control_valid=%d manual_throttle=%.3f trajectory_mode=%u target_position_ned_z=%.3f",
+PX4_INFO("RC height control: %s", instance->rc_height_control_enabled() ? "enabled" : "disabled");
+PX4_INFO("  manual: received=%d valid=%d throttle=%.3f",
+ (int)instance->_has_manual_control_setpoint,
  (int)instance->_manual_height_control_valid,
- (double)instance->_manual_height_stick,
+ (double)instance->_manual_height_stick);
+PX4_INFO("  trajectory: mode=%u target_z=%.3f target_vz=%.3f",
  (unsigned)instance->_trajectory_output.mode,
- (double)instance->_trajectory_output.position_ned[2]);
+ (double)instance->_trajectory_output.position_ned[2],
+ (double)instance->_trajectory_output.velocity_ned[2]);
 return 0;
 }
 
