@@ -1,0 +1,226 @@
+diff --git a/ROMFS/px4fmu_common/init.d-posix/airframes/10015_gazebo-classic_iris b/ROMFS/px4fmu_common/init.d-posix/airframes/10015_gazebo-classic_iris
+index 66391b2428..126092f04d 100644
+--- a/ROMFS/px4fmu_common/init.d-posix/airframes/10015_gazebo-classic_iris
++++ b/ROMFS/px4fmu_common/init.d-posix/airframes/10015_gazebo-classic_iris
+@@ -11,6 +11,7 @@
+ 
+ 
+ param set-default CA_AIRFRAME 0
++param set-default CA_FAILURE_MODE 1
+ 
+ param set-default CA_ROTOR_COUNT 4
+ param set-default CA_ROTOR0_PX 0.1515
+diff --git a/Tools/simulation/gazebo-classic/sitl_run.sh b/Tools/simulation/gazebo-classic/sitl_run.sh
+index 741d064dd6..08952a7eeb 100755
+--- a/Tools/simulation/gazebo-classic/sitl_run.sh
++++ b/Tools/simulation/gazebo-classic/sitl_run.sh
+@@ -33,6 +33,9 @@ mkdir -p "$rootfs"
+ # To disable user input
+ if [[ -n "$NO_PXH" ]]; then
+ 	no_pxh=-d
++elif [[ ! -t 0 ]]; then
++	echo "stdin is not a terminal, disabling pxh shell. Use px4-* client commands to control PX4."
++	no_pxh=-d
+ else
+ 	no_pxh=""
+ fi
+@@ -63,7 +66,7 @@ if [ "$model" == "" ] || [ "$model" == "none" ]; then
+ 	model="iris"
+ fi
+ 
+-# kill process names that might stil
++# kill process names that might still
+ # be running from last time
+ pkill -x gazebo || true
+ 
+@@ -71,6 +74,40 @@ export PX4_SIM_MODEL=gazebo-classic_${model}
+ export PX4_SIM_WORLD=${world}
+ 
+ SIM_PID=0
++GUI_PID=0
++PX4_PID=0
++CLEANUP_DONE=0
++
++cleanup_sim()
++{
++	local pid
++
++	if [ "${CLEANUP_DONE:-0}" -eq 1 ]; then
++		return
++	fi
++
++	CLEANUP_DONE=1
++
++	for pid in ${PX4_PID:-0} ${SIM_PID:-0} ${GUI_PID:-0}; do
++		if [ "$pid" -gt 0 ] 2>/dev/null && kill -0 "$pid" 2>/dev/null; then
++			kill "$pid" 2>/dev/null || true
++		fi
++	done
++
++	sleep 1
++
++	for pid in ${PX4_PID:-0} ${SIM_PID:-0} ${GUI_PID:-0}; do
++		if [ "$pid" -gt 0 ] 2>/dev/null && kill -0 "$pid" 2>/dev/null; then
++			kill -9 "$pid" 2>/dev/null || true
++		fi
++	done
++
++	wait ${PX4_PID:-0} ${SIM_PID:-0} ${GUI_PID:-0} 2>/dev/null || true
++}
++
++trap cleanup_sim EXIT
++trap 'cleanup_sim; exit 130' INT
++trap 'cleanup_sim; exit 143' TERM
+ 
+ if [ -x "$(command -v gazebo)" ]; then
+ 	# Get the model name
+@@ -164,13 +201,13 @@ elif [ "$debugger" == "valgrind" ]; then
+ elif [ "$debugger" == "callgrind" ]; then
+ 	eval valgrind --tool=callgrind -v $sitl_command
+ else
+-	eval $sitl_command
++	if [[ -n "$no_pxh" ]]; then
++		eval $sitl_command &
++		PX4_PID=$!
++		wait "$PX4_PID"
++	else
++		eval $sitl_command
++	fi
+ fi
+ 
+ popd >/dev/null
+-
+-
+-kill -9 $SIM_PID
+-if [[ ! -n "$HEADLESS" ]]; then
+-	kill -9 $GUI_PID
+-fi
+diff --git a/boards/px4/sitl/default.px4board b/boards/px4/sitl/default.px4board
+index d3d977e25c..73f4191548 100644
+--- a/boards/px4/sitl/default.px4board
++++ b/boards/px4/sitl/default.px4board
+@@ -86,3 +86,4 @@ CONFIG_EXAMPLES_PX4_SIMPLE_APP=y
+ CONFIG_EXAMPLES_WORK_ITEM=y
+ CONFIG_MODULES_SPACECRAFT=n
+ CONFIG_MODULES_L1_ADAPTIVE_CONTROL=y
++CONFIG_MODULES_L1_KEYBOARD_THROTTLE=y
+diff --git a/platforms/posix/src/px4/common/main.cpp b/platforms/posix/src/px4/common/main.cpp
+index db6bfe850b..39d3cf8e08 100644
+--- a/platforms/posix/src/px4/common/main.cpp
++++ b/platforms/posix/src/px4/common/main.cpp
+@@ -88,7 +88,8 @@ static const char *LOCK_FILE_PATH = "/tmp/px4_lock";
+ #endif
+ 
+ 
+-static volatile bool _exit_requested = false;
++static volatile sig_atomic_t _exit_requested = false;
++static volatile sig_atomic_t _exit_signal_count = 0;
+ 
+ 
+ namespace px4
+@@ -97,8 +98,10 @@ void init_once();
+ }
+ 
+ static void sig_int_handler(int sig_num);
++static void sig_alarm_handler(int sig_num);
+ 
+ static void register_sig_handler();
++static void write_stdout_from_signal(const char *msg, size_t len);
+ static void set_cpu_scaling();
+ static int create_symlinks_if_needed(std::string &data_path);
+ static int create_dirs();
+@@ -488,6 +491,10 @@ void register_sig_handler()
+ 	struct sigaction sig_pipe {};
+ 	sig_pipe.sa_handler = SIG_IGN;
+ 
++	struct sigaction sig_alarm {};
++	sig_alarm.sa_handler = sig_alarm_handler;
++	sig_alarm.sa_flags = 0;
++
+ #ifdef __PX4_CYGWIN
+ 	// Do not catch SIGINT on Cygwin such that the process gets killed
+ 	// TODO: All threads should exit gracefully see https://github.com/PX4/Firmware/issues/11027
+@@ -498,15 +505,40 @@ void register_sig_handler()
+ 
+ 	sigaction(SIGTERM, &sig_int, nullptr);
+ 	sigaction(SIGPIPE, &sig_pipe, nullptr);
++	sigaction(SIGALRM, &sig_alarm, nullptr);
+ }
+ 
+ void sig_int_handler(int sig_num)
+ {
+-	fflush(stdout);
+-	printf("\nPX4 Exiting...\n");
+-	fflush(stdout);
++	const char msg[] = "\nPX4 Exiting...\n";
++	write_stdout_from_signal(msg, sizeof(msg) - 1);
++
++	_exit_signal_count++;
++
++	if (_exit_signal_count > 1) {
++		_exit(128 + sig_num);
++	}
++
+ 	px4_daemon::Pxh::stop();
+ 	_exit_requested = true;
++	alarm(5);
++}
++
++void sig_alarm_handler(int sig_num)
++{
++	(void)sig_num;
++
++	if (_exit_requested) {
++		const char msg[] = "\nPX4 forced exit after shutdown timeout.\n";
++		write_stdout_from_signal(msg, sizeof(msg) - 1);
++		_exit(130);
++	}
++}
++
++void write_stdout_from_signal(const char *msg, size_t len)
++{
++	const ssize_t written = write(STDOUT_FILENO, msg, len);
++	(void)written;
+ }
+ 
+ void set_cpu_scaling()
+diff --git a/platforms/posix/src/px4/common/px4_daemon/pxh.cpp b/platforms/posix/src/px4/common/px4_daemon/pxh.cpp
+index 8774facd71..f5621b6890 100644
+--- a/platforms/posix/src/px4/common/px4_daemon/pxh.cpp
++++ b/platforms/posix/src/px4/common/px4_daemon/pxh.cpp
+@@ -317,6 +317,8 @@ void Pxh::run_pxh()
+ 
+ 		switch (c) {
+ 		case EOF:
++			_should_exit = true;
++			update_prompt = false;
+ 			break;
+ 
+ 		case '\t':
+diff --git a/src/modules/simulation/simulator_mavlink/SimulatorMavlink.cpp b/src/modules/simulation/simulator_mavlink/SimulatorMavlink.cpp
+index 342cfcd4e7..32db4bcc2a 100644
+--- a/src/modules/simulation/simulator_mavlink/SimulatorMavlink.cpp
++++ b/src/modules/simulation/simulator_mavlink/SimulatorMavlink.cpp
+@@ -1207,6 +1207,7 @@ void SimulatorMavlink::run()
+ 	pthread_attr_destroy(&sender_thread_attr);
+ 
+ 	mavlink_status_t mavlink_status = {};
++	hrt_abstime last_poll_timeout_log_us = 0;
+ 
+ 	// Request HIL_STATE_QUATERNION for ground truth.
+ 	request_hil_state_quaternion();
+@@ -1218,7 +1219,13 @@ void SimulatorMavlink::run()
+ 
+ 		if (pret == 0) {
+ 			// Timed out.
+-			PX4_ERR("poll timeout %d, %d", pret, errno);
++			const hrt_abstime now_us = hrt_absolute_time();
++
++			if (last_poll_timeout_log_us == 0 || now_us - last_poll_timeout_log_us > 5_s) {
++				PX4_WARN("simulator poll timeout %d, %d", pret, errno);
++				last_poll_timeout_log_us = now_us;
++			}
++
+ 			continue;
+ 		}
+ 

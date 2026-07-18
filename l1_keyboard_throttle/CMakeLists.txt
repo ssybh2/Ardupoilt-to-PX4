@@ -7,3 +7,5 @@ L1KeyboardThrottle.cpp
 DEPENDS
 modules__l1_adaptive_control
 )
+
+px4_add_unit_gtest(SRC L1KeyboardThrottleLogicTest.cpp)

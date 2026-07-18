@@ -45,10 +45,22 @@ float target_force_dot_ned[3]{0.f, 0.f, 0.f};
 float target_force_ddot_ned[3]{0.f, 0.f, 0.f};
 
 float body_z_axis_ned[3]{0.f, 0.f, 1.f};
+float body_z_axis_dot_ned[3]{0.f, 0.f, 0.f};
+float target_thrust_dot_newton_s{0.f};
 
 float desired_body_x_axis_ned[3]{1.f, 0.f, 0.f};
 float desired_body_y_axis_ned[3]{0.f, 1.f, 0.f};
 float desired_body_z_axis_ned[3]{0.f, 0.f, 1.f};
+float desired_body_x_axis_dot_ned[3]{0.f, 0.f, 0.f};
+float desired_body_y_axis_dot_ned[3]{0.f, 0.f, 0.f};
+float desired_body_z_axis_dot_ned[3]{0.f, 0.f, 0.f};
+float desired_body_x_axis_ddot_ned[3]{0.f, 0.f, 0.f};
+float desired_body_y_axis_ddot_ned[3]{0.f, 0.f, 0.f};
+float desired_body_z_axis_ddot_ned[3]{0.f, 0.f, 0.f};
+
+float desired_rotation_matrix[3][3]{{1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 0.f, 1.f}};
+float desired_rotation_matrix_dot[3][3]{{0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}};
+float desired_rotation_matrix_ddot[3][3]{{0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}};
 
 // Stage: unit_vec(-target_force, -target_force_dot, -target_force_ddot)
 float b3c_ned[3]{0.f, 0.f, 1.f};
@@ -67,9 +79,11 @@ float b2c_ddot_ned[3]{0.f, 0.f, 0.f};
 float rotation_error[3]{0.f, 0.f, 0.f};
 
 float desired_angular_velocity_body[3]{0.f, 0.f, 0.f};
+float desired_angular_acceleration_body[3]{0.f, 0.f, 0.f};
 float angular_velocity_error[3]{0.f, 0.f, 0.f};
 
 float pd_moment_newton_meter[3]{0.f, 0.f, 0.f};
+float feedforward_moment_newton_meter[3]{0.f, 0.f, 0.f};
 float j_omega_body[3]{0.f, 0.f, 0.f};
 float gyro_moment_newton_meter[3]{0.f, 0.f, 0.f};
 

@@ -13,4 +13,5 @@ DEPENDS
 px4_work_queue
 )
 
-px4_add_unit_gtest(SRC TrajectoryGeneratorTest.cpp TrajectoryGenerator.cpp)
+px4_add_unit_gtest(SRC TrajectoryGeneratorTest.cpp EXTRA_SRCS TrajectoryGenerator.cpp)
+px4_add_unit_gtest(SRC GeometricControllerTest.cpp EXTRA_SRCS GeometricController.cpp)

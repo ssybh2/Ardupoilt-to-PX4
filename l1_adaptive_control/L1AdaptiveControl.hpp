@@ -43,6 +43,11 @@ int print_status() override;
 
 void set_rc_height_control_enabled(bool enabled);
 bool rc_height_control_enabled() const { return _rc_height_control_enabled.load(); }
+void set_trajectory_mode(TrajectoryGenerator::CommandedMode mode);
+TrajectoryGenerator::CommandedMode trajectory_mode() const
+{
+return static_cast<TrajectoryGenerator::CommandedMode>(_trajectory_command_mode.load());
+}
 
 private:
 struct InternalState {
@@ -91,6 +96,7 @@ void update_internal_state();
 void update_trajectory_input();
 void run_trajectory_generator();
 void update_manual_height_control_input();
+void apply_trajectory_command();
 
 void update_controller_input();
 void run_geometric_controller();
@@ -123,6 +129,7 @@ bool _has_manual_control_setpoint{false};
 bool _has_vehicle_status{false};
 
 px4::atomic_bool _rc_height_control_enabled{false};
+px4::atomic<uint8_t> _trajectory_command_mode{static_cast<uint8_t>(TrajectoryGenerator::CommandedMode::Hover)};
 bool _manual_height_control_valid{false};
 float _manual_height_stick{0.f};
 

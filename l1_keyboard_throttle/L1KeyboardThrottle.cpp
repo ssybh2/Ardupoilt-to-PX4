@@ -1,8 +1,11 @@
+#include "L1KeyboardThrottleLogic.hpp"
+
 #include <drivers/drv_hrt.h>
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/module.h>
 #include <uORB/Publication.hpp>
 #include <uORB/topics/manual_control_setpoint.h>
+#include <uORB/topics/vehicle_command.h>
 
 #include <math.h>
 #include <poll.h>
@@ -11,28 +14,10 @@
 #include <unistd.h>
 
 extern "C" __EXPORT int l1_keyboard_throttle_main(int argc, char *argv[]);
-extern "C" __EXPORT int l1_adaptive_control_main(int argc, char *argv[]);
-
 namespace
 {
 
-static constexpr float THROTTLE_STEP = 0.2f;
-static constexpr float THROTTLE_MIN = -1.0f;
-static constexpr float THROTTLE_MAX = 1.0f;
 static constexpr int PUBLISH_INTERVAL_MS = 50;
-
-float constrain_throttle(float value)
-{
-	if (value > THROTTLE_MAX) {
-		return THROTTLE_MAX;
-	}
-
-	if (value < THROTTLE_MIN) {
-		return THROTTLE_MIN;
-	}
-
-	return value;
-}
 
 class RawTerminalGuard
 {
@@ -87,30 +72,28 @@ void publish_manual_control(uORB::Publication<manual_control_setpoint_s> &publis
 	publisher.publish(manual);
 }
 
-void disable_l1_rc_control()
+void publish_motor_failure_command(uORB::Publication<vehicle_command_s> &publisher, uint8_t failure_type)
 {
-	char arg0[] = "l1_adaptive_control";
-	char arg1[] = "rc_control";
-	char arg2[] = "disable";
-	char *argv[] = {arg0, arg1, arg2};
+	vehicle_command_s command{};
+	command.timestamp = hrt_absolute_time();
+	command.command = vehicle_command_s::VEHICLE_CMD_INJECT_FAILURE;
+	command.param1 = static_cast<float>(vehicle_command_s::FAILURE_UNIT_SYSTEM_MOTOR);
+	command.param2 = static_cast<float>(failure_type);
+	command.param3 = static_cast<float>(L1_KEYBOARD_THROTTLE_FAILED_MOTOR_INSTANCE);
 
-	const int ret = l1_adaptive_control_main(3, argv);
-
-	if (ret != 0) {
-		PX4_WARN("could not disable rc_control automatically");
-		PX4_WARN("Please run: l1_adaptive_control rc_control disable");
-	}
+	publisher.publish(command);
 }
 
 int run_keyboard_throttle()
 {
 	RawTerminalGuard terminal_guard;
 	uORB::Publication<manual_control_setpoint_s> manual_control_pub{ORB_ID(manual_control_setpoint)};
-	float throttle = 0.f;
+	uORB::Publication<vehicle_command_s> vehicle_command_pub{ORB_ID(vehicle_command)};
+	L1KeyboardThrottleState state{};
 
 	PX4_INFO("l1_keyboard_throttle started");
-	PX4_INFO("keys: w +0.2, s -0.2, 0 reset+disable rc_control, q quit");
-	PX4_INFO("throttle = %.1f", (double)throttle);
+	PX4_INFO("keys: w +0.2, s -0.2, x/space hold height, 0 fail motor 1, r restore motor 1, q quit");
+	PX4_INFO("throttle = %.1f", (double)state.throttle);
 
 	while (true) {
 		struct pollfd fds {};
@@ -123,30 +106,28 @@ int run_keyboard_throttle()
 			char key = 0;
 
 			while (read(STDIN_FILENO, &key, 1) == 1) {
-				if (key == 'w' || key == 'W') {
-					throttle = constrain_throttle(throttle + THROTTLE_STEP);
-					PX4_INFO("throttle = %.1f", (double)throttle);
+				const L1KeyboardThrottleAction action = handle_l1_keyboard_throttle_key(state, key);
 
-				} else if (key == 's' || key == 'S') {
-					throttle = constrain_throttle(throttle - THROTTLE_STEP);
-					PX4_INFO("throttle = %.1f", (double)throttle);
+				if (action == L1KeyboardThrottleAction::PublishThrottle) {
+					PX4_INFO("throttle = %.1f", (double)state.throttle);
 
-				} else if (key == '0') {
-					throttle = 0.f;
-					publish_manual_control(manual_control_pub, throttle);
-					PX4_INFO("throttle = %.1f", (double)throttle);
-					disable_l1_rc_control();
+				} else if (action == L1KeyboardThrottleAction::InjectMotorFailure) {
+					publish_motor_failure_command(vehicle_command_pub, vehicle_command_s::FAILURE_TYPE_OFF);
+					PX4_WARN("motor %d failure injected", L1_KEYBOARD_THROTTLE_FAILED_MOTOR_INSTANCE);
 
-				} else if (key == 'q' || key == 'Q' || key == 0x03 || key == 0x1b) {
-					throttle = 0.f;
-					publish_manual_control(manual_control_pub, throttle);
+				} else if (action == L1KeyboardThrottleAction::RestoreMotor) {
+					publish_motor_failure_command(vehicle_command_pub, vehicle_command_s::FAILURE_TYPE_OK);
+					PX4_WARN("motor %d restored", L1_KEYBOARD_THROTTLE_FAILED_MOTOR_INSTANCE);
+
+				} else if (action == L1KeyboardThrottleAction::Quit) {
+					publish_manual_control(manual_control_pub, state.throttle);
 					PX4_INFO("l1_keyboard_throttle stopped");
 					return 0;
 				}
 			}
 		}
 
-		publish_manual_control(manual_control_pub, throttle);
+		publish_manual_control(manual_control_pub, state.throttle);
 	}
 }
 

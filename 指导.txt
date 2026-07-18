@@ -1,289 +1,236 @@
-PX4 v1.17.0 L1 控制器 Gazebo UI 仿真指导
+PX4 v1.17.0 L1 控制器最简操作指导
 
-用户速览
+工程目录：
 
-本流程用于在 Gazebo Classic UI 中测试自定义 PX4 模块：
+  /home/aim/px4_ws/PX4-Autopilot-v1.17.0
 
-1. 启动 PX4 + Gazebo UI：
-
-   cd /home/aim/px4_ws/PX4-Autopilot-v1.17.0
-   source /home/aim/px4_ws/px4-venv/bin/activate
-   unset HEADLESS
-   make px4_sitl gazebo-classic_iris
-
-2. 进入 PX4 shell 的 pxh> 后切换到 L1 控制：
-
-   mc_rate_control stop
-   l1_adaptive_control start
-   commander arm
-
-3. 开启遥控器高度接管：
-
-   l1_adaptive_control rc_control enable
-   l1_keyboard_throttle start
-
-4. 键盘控制：
-
-   w  throttle +0.2，目标高度上升
-   s  throttle -0.2，目标高度下降
-   0  throttle 清零，并关闭 rc_control
-   q  退出键盘 throttle 工具
-
-5. 关闭遥控器高度接管：
-
-   如果还在 l1_keyboard_throttle 中，按 0。
-   如果已经退出键盘工具，在 pxh> 中执行：
-
-   l1_adaptive_control rc_control disable
-
-6. 终止仿真：
-
-   推荐在 pxh> 中执行：
-
-   shutdown
-
-   也可以在启动仿真的终端中按 Ctrl+C。当前工作区已修复 Ctrl+C 后 PX4 Exiting 卡住的问题，Ctrl+C 会同时清理 PX4、gzserver 和 gzclient。
+本指导只用于 Gazebo Classic UI 仿真，不要用于真实飞机。
 
 
-一、重要说明
+一、先清理残留仿真
 
-1. 本流程只用于 Gazebo 仿真，不要直接用于真实飞机。
-2. 当前 L1 控制器是独立 PX4 模块，模块名是 l1_adaptive_control。
-3. 当前键盘遥控测试工具是独立 PX4 模块，模块名是 l1_keyboard_throttle。
-4. L1 控制器会发布 vehicle_thrust_setpoint 和 vehicle_torque_setpoint。
-5. PX4 默认 mc_rate_control 也会发布同类控制量，所以测试 L1 前必须先执行 mc_rate_control stop。
-6. 当前 L1 轨迹逻辑是：解锁后自动起飞到约 1 m，然后悬停。
-7. 遥控器高度接管只修改目标高度和目标垂直速度，不直接修改推力输出。
+如果上一次仿真异常退出，先执行：
+
+cd /home/aim/px4_ws/PX4-Autopilot-v1.17.0
+build/px4_sitl_default/bin/px4-shutdown 2>/dev/null || true
+pkill -x gzclient 2>/dev/null || true
+pkill -x gzserver 2>/dev/null || true
+pkill -x gazebo 2>/dev/null || true
+pkill -f build/px4_sitl_default/bin/px4 2>/dev/null || true
+pkill -f sitl_run.sh 2>/dev/null || true
+
+确认没有残留：
+
+ps -eo pid,comm,args | awk '$2=="px4" || $2=="gzserver" || $2=="gzclient" || $2=="gazebo" || $2=="sitl_run.sh" {print}'
+
+如果没有输出，说明已经清理干净。
 
 
-二、启动带 UI 的 Gazebo Classic 仿真
+二、方式 A：需要键盘操控时使用
 
-打开终端：
+键盘 w/s/0/r/q 需要真实可交互终端，所以必须让 PX4 进入 pxh>。
+
+打开一个普通终端，执行：
 
 cd /home/aim/px4_ws/PX4-Autopilot-v1.17.0
 source /home/aim/px4_ws/px4-venv/bin/activate
 unset HEADLESS
+unset NO_PXH
 make px4_sitl gazebo-classic_iris
 
 正常现象：
 
-1. 终端会编译或直接启动 PX4 SITL。
-2. Gazebo Classic 图形窗口会打开。
-3. Gazebo 中会出现 Iris 四旋翼。
-4. 终端最后进入 PX4 shell，提示符为：
+1. Gazebo Classic UI 打开。
+2. Iris 四旋翼出现。
+3. 终端出现 pxh>。
 
-pxh>
-
-如果 Gazebo UI 没有出现：
-
-1. 确认执行过 unset HEADLESS。
-2. 确认当前环境有图形桌面，DISPLAY 不为空。
-3. 如果使用远程桌面，确认远程桌面的图形转发正常。
+如果出现 pxh> 后马上 Exiting NOW，或 pxh> 高速刷新，说明当前终端不能做键盘操控。请换一个真实桌面终端再试，或使用下方“方式 B”。
 
 
-三、切换到 L1 模式
+三、启动 L1 并起飞
 
-在 pxh> 中依次执行：
+看到 pxh> 后输入：
 
 mc_rate_control stop
 l1_adaptive_control start
+commander arm
+
+如果 arm 被 EKF 或 preflight 拒绝，等 3-5 秒后再输入一次：
+
 commander arm
 
 预期现象：
 
 1. 飞机解锁。
-2. L1 控制器开始发布推力和力矩 setpoint。
-3. 飞机自动起飞并悬停在约 1 m。
+2. 自动起飞到约 1 米。
+3. 起飞完成后进入悬停。
 
-检查 L1 状态：
+检查状态：
 
 l1_adaptive_control status
-
-重点看这些字段：
-
-state_valid_for_control=1
-trajectory_valid=1
-geometric_output_valid=1
-l1_update_executed=1
-publish_active=1
-publish_count 大于 0
-
-检查位置：
-
 listener vehicle_local_position 1
 
-NED 坐标系中，z 约为 -1.0 表示高度约 1 m。
+成功时重点看：
+
+armed=1
+failsafe=0
+valid=1
+pipeline: traj=1 geo=1 l1=1 publish=1
+vehicle_local_position 的 z 接近 -1.0
 
 
-四、接入遥控器高度控制
+四、随时切换轨迹
 
-在 pxh> 中执行：
+查看当前轨迹：
+
+l1_adaptive_control trajectory status
+
+切到圆轨迹：
+
+l1_adaptive_control trajectory circle
+
+切回悬停：
+
+l1_adaptive_control trajectory hover
+
+建议先等飞机起飞并稳定悬停后，再切换圆轨迹。
+
+
+五、随时启动键盘操控
+
+先确认飞机已经起飞或正在悬停，然后在 pxh> 输入：
 
 l1_adaptive_control rc_control enable
 l1_keyboard_throttle start
 
-l1_keyboard_throttle 是前台交互工具。启动后当前 pxh> 会进入键盘读取状态，此时直接按键即可，不需要再输入回车。
+启动后当前终端会进入键盘读取状态，不会继续显示 pxh>。
+此时直接按键，不需要回车。
 
-按键含义：
+按键：
 
-w  throttle 增加 0.2，目标高度上升
-s  throttle 减少 0.2，目标高度下降
-0  throttle 归零，并自动执行 l1_adaptive_control rc_control disable
-q  throttle 归零，并退出 l1_keyboard_throttle
+w  目标高度上升
+s  目标高度下降
+x 或空格  停止继续上升/下降，保持当前目标高度
+0  固定失能 Motor 1
+r  恢复 Motor 1
+q  退出键盘工具，并把 throttle 清零
 
-注意：
+飞圆形轨迹时也可以使用同一套高度控制：
 
-1. throttle 范围限制在 [-1.0, 1.0]。
-2. throttle 为 0 时保持当前手动目标高度。
-3. throttle 为正时上升，NED target_z 会变小。
-4. throttle 为负时下降，NED target_z 会变大。
-5. 该工具发布 manual_control_setpoint.throttle，不直接发布推力。
-
-查看遥控输入：
-
-listener manual_control_setpoint 1
-
-查看 L1 是否收到遥控输入：
-
-l1_adaptive_control status
-
-重点看：
-
-rc_height=1
-manual=1
-valid=1
-throttle=当前键盘 throttle
+1. 先执行 l1_adaptive_control trajectory circle。
+2. 再执行 l1_adaptive_control rc_control enable 和 l1_keyboard_throttle start。
+3. 按 w 上升，按 s 下降，按 x 或空格保持当前高度。
+4. 按 q 退出键盘工具后，可以继续切换 trajectory hover/circle。
 
 
-五、去掉遥控器高度控制
+六、结束键盘操控
 
-方式 1：仍在 l1_keyboard_throttle 中时，直接按：
-
-0
-
-效果：
-
-1. throttle 清零。
-2. 自动关闭 rc_control。
-3. L1 轨迹重新回到默认 1 m 悬停逻辑。
-
-方式 2：已经退出键盘工具后，在 pxh> 中执行：
-
-l1_adaptive_control rc_control disable
-
-如果只是退出键盘工具但不关闭 rc_control，可以按：
+在键盘工具运行时按：
 
 q
 
-此时 throttle 会清零，键盘工具退出；如需让 L1 完全回到默认轨迹控制，还应执行：
+回到 pxh> 后输入：
 
 l1_adaptive_control rc_control disable
 
-查看当前开关状态：
+查看是否关闭：
 
 l1_adaptive_control rc_control status
 
+看到 RC height control: disabled 即可。
 
-六、终止仿真
 
-推荐方式：在 pxh> 中执行：
+七、结束仿真
+
+如果正在键盘工具里，先按：
+
+q
+
+然后在 pxh> 输入：
 
 shutdown
 
-这会关闭 PX4 SITL，并触发 Gazebo 清理。
+也可以按 Ctrl+C 结束仿真。当前工作区已经加了退出兜底：第一次 Ctrl+C 会正常请求 PX4 退出；如果 5 秒内仍卡在 PX4 Exiting，会自动强制结束；第二次 Ctrl+C 会立即强制结束。
 
-如果终端正在 l1_keyboard_throttle 中：
+如果 pxh> 已经不可用，可以打开另一个终端执行：
 
-1. 按 q 退出键盘工具。
-2. 在 pxh> 中执行 shutdown。
+cd /home/aim/px4_ws/PX4-Autopilot-v1.17.0
+build/px4_sitl_default/bin/px4-shutdown
 
-备用方式：在启动仿真的终端按：
-
-Ctrl+C
-
-当前工作区已修复 Ctrl+C 后卡在 PX4 Exiting 的问题。修复后 Ctrl+C 会触发 sitl_run.sh 的清理逻辑，收掉本次启动的 gzserver 和 gzclient。
-
-如果异常情况下仍有残留进程，可以手动检查：
-
-ps -eo pid,ppid,stat,cmd | rg 'px4|gzserver|gzclient|gazebo'
-
-手动清理：
-
-pkill -x gzclient
-pkill -x gzserver
-pkill -f build/px4_sitl_default/bin/px4
+如果仍有残留，再执行第一节“清理残留仿真”。
 
 
-七、一次完整操作示例
+八、方式 B：pxh 不可用时的备用起飞和轨迹
 
-终端中执行：
+如果你的终端无法稳定使用 pxh>，可以用后台模式启动并用 px4-* client 命令控制。这个方式能起飞和切换轨迹，但不能使用键盘 w/s/0/r/q。
+
+启动：
 
 cd /home/aim/px4_ws/PX4-Autopilot-v1.17.0
 source /home/aim/px4_ws/px4-venv/bin/activate
 unset HEADLESS
-make px4_sitl gazebo-classic_iris
+export NO_PXH=1
+make px4_sitl gazebo-classic_iris > /tmp/px4_l1_ui.log 2>&1 &
 
-进入 pxh> 后执行：
+等待启动：
+
+sleep 18
+
+启动 L1 并起飞：
+
+build/px4_sitl_default/bin/px4-mc_rate_control stop
+build/px4_sitl_default/bin/px4-l1_adaptive_control start
+sleep 8
+build/px4_sitl_default/bin/px4-commander arm
+
+检查：
+
+build/px4_sitl_default/bin/px4-l1_adaptive_control status
+build/px4_sitl_default/bin/px4-listener vehicle_local_position 1
+
+轨迹：
+
+build/px4_sitl_default/bin/px4-l1_adaptive_control trajectory status
+build/px4_sitl_default/bin/px4-l1_adaptive_control trajectory circle
+build/px4_sitl_default/bin/px4-l1_adaptive_control trajectory hover
+
+结束：
+
+build/px4_sitl_default/bin/px4-shutdown
+
+
+九、常见问题
+
+1. 输入 make 后出现 pxh> Exiting NOW。
+
+当前终端不能作为 PX4 交互 shell。需要键盘操控时，换一个真实桌面终端重新执行方式 A；只需要起飞和轨迹时，用方式 B。
+
+2. 输入 commander arm 后不飞。
+
+确认先执行了：
 
 mc_rate_control stop
 l1_adaptive_control start
-commander arm
 
-等待飞机起飞并悬停后，开启键盘高度控制：
+然后等 8 秒再 arm。
+
+3. 按 w/s 没反应。
+
+确认已经执行：
 
 l1_adaptive_control rc_control enable
 l1_keyboard_throttle start
 
-按键测试：
+并且当前终端停在 l1_keyboard_throttle 工具里。键盘工具运行时不会显示 pxh>。
 
-w
-w
-s
-0
+4. 按 0 后飞机不稳。
 
-结束仿真：
+0 会真实注入 Motor 1 off。普通四旋翼单电机完全失能后不保证还能稳定悬停。
 
-shutdown
+5. MAVLink only on localhost 是错误吗？
 
+不是。这只是提示 MAVLink 只监听本机。
 
-八、常见问题
+6. poll timeout 是错误吗？
 
-问题 1：Gazebo 没有弹出 UI。
-
-处理：
-
-unset HEADLESS
-echo $DISPLAY
-make px4_sitl gazebo-classic_iris
-
-如果 DISPLAY 为空，需要先进入图形桌面或配置远程桌面。
-
-问题 2：启动 L1 后没有控制输出。
-
-处理：
-
-1. 确认执行了 mc_rate_control stop。
-2. 确认执行了 l1_adaptive_control start。
-3. 确认执行了 commander arm。
-4. 执行 l1_adaptive_control status，检查 publish_active 和 publish_count。
-
-问题 3：按 w/s 没有效果。
-
-处理：
-
-1. 确认执行了 l1_adaptive_control rc_control enable。
-2. 确认 l1_keyboard_throttle start 正在运行。
-3. 执行 l1_adaptive_control status，检查 rc_height、manual、valid、throttle。
-4. 注意 l1_keyboard_throttle 是前台工具，必须让当前终端停在该工具里按键。
-
-问题 4：按 Ctrl+C 后退出。
-
-说明：
-
-Ctrl+C 会终止当前仿真。修复后不应再卡在 PX4 Exiting。若只是想退出键盘工具，不要按 Ctrl+C，按 q。
-
-问题 5：commander disarm 提示 not landed。
-
-说明：
-
-飞机仍在空中时 PX4 会拒绝直接 disarm。仿真测试中建议使用 shutdown 结束。
+不一定。Gazebo UI 卡顿时可能出现 poll timeout。当前工作区已经把这类日志限频，避免它持续刷屏影响 pxh> 输入。只要飞机能起飞、status 正常、位置 z 接近 -1.0，就先不要把它当作 L1 控制器失败。

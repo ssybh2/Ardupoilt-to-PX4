@@ -138,6 +138,7 @@ perf_count(_loop_interval_perf);
 update_subscriptions();
 update_internal_state();
 
+apply_trajectory_command();
 update_trajectory_input();
 run_trajectory_generator();
 
@@ -247,6 +248,18 @@ update_manual_height_control_input();
 _trajectory_input.manual_height_control_enabled = _rc_height_control_enabled.load();
 _trajectory_input.manual_height_control_valid = _manual_height_control_valid;
 _trajectory_input.manual_height_stick = _manual_height_stick;
+}
+
+void L1AdaptiveControl::apply_trajectory_command()
+{
+const uint8_t command = _trajectory_command_mode.load();
+
+if (command == static_cast<uint8_t>(TrajectoryGenerator::CommandedMode::Circle)) {
+_trajectory_generator.set_commanded_mode(TrajectoryGenerator::CommandedMode::Circle);
+
+} else {
+_trajectory_generator.set_commanded_mode(TrajectoryGenerator::CommandedMode::Hover);
+}
 }
 
 void L1AdaptiveControl::run_trajectory_generator()
@@ -644,6 +657,9 @@ PX4_INFO("  trajectory: mode=%u valid=%d target_z=%.3f target_vz=%.3f elapsed=%.
  (double)_trajectory_output.velocity_ned[2],
  (double)_trajectory_output.elapsed_time_s);
 
+PX4_INFO("  trajectory command: %s",
+ trajectory_mode() == TrajectoryGenerator::CommandedMode::Circle ? "circle" : "hover");
+
 PX4_INFO("  rc height: enabled=%d received=%d valid=%d throttle=%.3f",
  (int)_rc_height_control_enabled.load(),
  (int)_has_manual_control_setpoint,
@@ -675,6 +691,11 @@ void L1AdaptiveControl::set_rc_height_control_enabled(bool enabled)
 _rc_height_control_enabled.store(enabled);
 _manual_height_control_valid = false;
 _manual_height_stick = 0.f;
+}
+
+void L1AdaptiveControl::set_trajectory_mode(TrajectoryGenerator::CommandedMode mode)
+{
+_trajectory_command_mode.store(static_cast<uint8_t>(mode));
 }
 
 int L1AdaptiveControl::custom_command(int argc, char *argv[])
@@ -720,6 +741,50 @@ return 0;
 return print_usage("unknown rc_control argument");
 }
 
+if (argc >= 1 && !strcmp(argv[0], "trajectory")) {
+if (!is_running()) {
+PX4_ERR("module not running");
+return -1;
+}
+
+L1AdaptiveControl *instance = get_instance();
+
+if (instance == nullptr) {
+PX4_ERR("module instance unavailable");
+return -1;
+}
+
+if (argc < 2 || !strcmp(argv[1], "status")) {
+PX4_INFO("Trajectory command: %s",
+ instance->trajectory_mode() == TrajectoryGenerator::CommandedMode::Circle ? "circle" : "hover");
+PX4_INFO("  output: mode=%u valid=%d pos=[%.3f %.3f %.3f] vel=[%.3f %.3f %.3f] yaw=%.3f",
+ (unsigned)instance->_trajectory_output.mode,
+ (int)instance->_trajectory_output.valid,
+ (double)instance->_trajectory_output.position_ned[0],
+ (double)instance->_trajectory_output.position_ned[1],
+ (double)instance->_trajectory_output.position_ned[2],
+ (double)instance->_trajectory_output.velocity_ned[0],
+ (double)instance->_trajectory_output.velocity_ned[1],
+ (double)instance->_trajectory_output.velocity_ned[2],
+ (double)instance->_trajectory_output.yaw);
+return 0;
+}
+
+if (!strcmp(argv[1], "hover")) {
+instance->set_trajectory_mode(TrajectoryGenerator::CommandedMode::Hover);
+PX4_INFO("Trajectory command set to hover");
+return 0;
+}
+
+if (!strcmp(argv[1], "circle")) {
+instance->set_trajectory_mode(TrajectoryGenerator::CommandedMode::Circle);
+PX4_INFO("Trajectory command set to circle");
+return 0;
+}
+
+return print_usage("unknown trajectory argument");
+}
+
 return print_usage("unknown command");
 }
 
@@ -741,17 +806,19 @@ Current stage:
 - Subscribe manual_control_setpoint
 - Subscribe vehicle_status
 - Convert uORB messages into internal controller state
-- Generate takeoff-and-hold trajectory
+- Generate takeoff-hover/circle trajectory
 - Convert trajectory output into GeometricController input
 - Run geometric controller
 - Run L1 adaptive augmentation
 - Publish vehicle_thrust_setpoint and vehicle_torque_setpoint for PX4 control_allocator
+- Switch post-takeoff trajectory between hover and fixed-yaw circle
 )DESCR_STR");
 
 PRINT_MODULE_USAGE_NAME("l1_adaptive_control", "controller");
 PRINT_MODULE_USAGE_COMMAND("start");
 PRINT_MODULE_USAGE_COMMAND("status");
 PRINT_MODULE_USAGE_COMMAND_DESCR("rc_control", "enable/disable/status optional RC throttle height control");
+PRINT_MODULE_USAGE_COMMAND_DESCR("trajectory", "hover/circle/status trajectory command");
 PRINT_MODULE_USAGE_COMMAND("stop");
 PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
 

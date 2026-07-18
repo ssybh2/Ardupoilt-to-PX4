@@ -1,0 +1,20 @@
+diff --git a/src/mavlink_interface.cpp b/src/mavlink_interface.cpp
+index 43bab08..1ba4e94 100644
+--- a/src/mavlink_interface.cpp
++++ b/src/mavlink_interface.cpp
+@@ -388,7 +388,14 @@ void MavlinkInterface::pollForMAVLinkMessages()
+ 
+     if (ret == 0) {
+       if (needs_to_wait_for_actuator) {
+-        std::cerr << "poll timeout\n";
++        static auto last_poll_timeout_log = std::chrono::steady_clock::time_point{};
++        const auto now = std::chrono::steady_clock::now();
++
++        if (last_poll_timeout_log == std::chrono::steady_clock::time_point{} ||
++            now - last_poll_timeout_log > std::chrono::seconds(5)) {
++          std::cerr << "poll timeout\n";
++          last_poll_timeout_log = now;
++        }
+       }
+       return;
+     }
