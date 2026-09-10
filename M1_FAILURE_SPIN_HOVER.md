@@ -21,7 +21,7 @@ The motor failure command is published as `VEHICLE_CMD_INJECT_FAILURE` with:
 - `FAILURE_TYPE_OFF` / `FAILURE_TYPE_OK`
 - motor instance `1`
 
-### Baseline controller + L1 entry
+### PID baseline controller + L1 entry
 
 `l1_adaptive_control/L1AdaptiveControl.cpp`
 
@@ -29,15 +29,15 @@ The main loop is:
 
 ```text
 trajectory generator
-    -> update_controller_input()
-    -> run_geometric_controller()      (legacy function name)
+    -> update_pid_input()
+    -> run_pid_controller()
     -> run_l1_adaptive_augmentation()
     -> publish_control_setpoints()
 ```
 
-On this branch `run_geometric_controller()` now calls `SimplePIDController`; the old member/function name is intentionally retained to avoid a large unrelated refactor.
+The baseline controller is `SimplePIDController`. The old geometric-controller member and function names have been removed on this branch so the source now reflects the actual controller being executed.
 
-The baseline controller outputs physical:
+The PID baseline controller outputs physical:
 
 ```text
 [T, Mx, My, Mz]
