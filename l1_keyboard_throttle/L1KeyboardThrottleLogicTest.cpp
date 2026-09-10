@@ -2,7 +2,31 @@
 
 #include <gtest/gtest.h>
 
-TEST(L1KeyboardThrottleLogic, WAndSAdjustThrottleOnly)
+TEST(L1KeyboardThrottleLogic, OneRequestsTakeoffAndNeutralizesHeightStick)
+{
+	L1KeyboardThrottleState state{};
+	state.throttle = 0.6f;
+
+	const L1KeyboardThrottleAction action = handle_l1_keyboard_throttle_key(state, '1');
+
+	EXPECT_EQ(action, L1KeyboardThrottleAction::TakeoffHover);
+	EXPECT_FLOAT_EQ(state.throttle, 0.f);
+	EXPECT_FLOAT_EQ(L1_KEYBOARD_TAKEOFF_COMMAND_STICK, 0.97f);
+}
+
+TEST(L1KeyboardThrottleLogic, TwoRequestsLandingAndNeutralizesHeightStick)
+{
+	L1KeyboardThrottleState state{};
+	state.throttle = -0.4f;
+
+	const L1KeyboardThrottleAction action = handle_l1_keyboard_throttle_key(state, '2');
+
+	EXPECT_EQ(action, L1KeyboardThrottleAction::Land);
+	EXPECT_FLOAT_EQ(state.throttle, 0.f);
+	EXPECT_FLOAT_EQ(L1_KEYBOARD_LAND_COMMAND_STICK, -0.97f);
+}
+
+TEST(L1KeyboardThrottleLogic, WAndSAdjustHeightStickOnly)
 {
 	L1KeyboardThrottleState state{};
 
@@ -15,7 +39,7 @@ TEST(L1KeyboardThrottleLogic, WAndSAdjustThrottleOnly)
 	EXPECT_FLOAT_EQ(state.throttle, 0.f);
 }
 
-TEST(L1KeyboardThrottleLogic, ZeroInjectsFixedMotorFaultWithoutChangingThrottle)
+TEST(L1KeyboardThrottleLogic, ZeroInjectsFixedMotorFaultWithoutChangingHeightStick)
 {
 	L1KeyboardThrottleState state{};
 	state.throttle = 0.4f;
@@ -27,7 +51,7 @@ TEST(L1KeyboardThrottleLogic, ZeroInjectsFixedMotorFaultWithoutChangingThrottle)
 	EXPECT_FLOAT_EQ(state.throttle, 0.4f);
 }
 
-TEST(L1KeyboardThrottleLogic, XAndSpaceZeroThrottleForHeightHold)
+TEST(L1KeyboardThrottleLogic, XAndSpaceZeroHeightStick)
 {
 	L1KeyboardThrottleState state{};
 	state.throttle = 0.6f;
@@ -42,7 +66,7 @@ TEST(L1KeyboardThrottleLogic, XAndSpaceZeroThrottleForHeightHold)
 	EXPECT_FLOAT_EQ(state.throttle, 0.f);
 }
 
-TEST(L1KeyboardThrottleLogic, RRestoresFixedMotorWithoutChangingThrottle)
+TEST(L1KeyboardThrottleLogic, RRestoresFixedMotorWithoutChangingHeightStick)
 {
 	L1KeyboardThrottleState state{};
 	state.throttle = -0.2f;
@@ -54,7 +78,7 @@ TEST(L1KeyboardThrottleLogic, RRestoresFixedMotorWithoutChangingThrottle)
 	EXPECT_FLOAT_EQ(state.throttle, -0.2f);
 }
 
-TEST(L1KeyboardThrottleLogic, QQuitsAndZerosThrottle)
+TEST(L1KeyboardThrottleLogic, QQuitsAndZerosHeightStick)
 {
 	L1KeyboardThrottleState state{};
 	state.throttle = 0.6f;
