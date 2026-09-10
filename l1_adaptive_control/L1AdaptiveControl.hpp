@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GeometricController.hpp"
+#include "SimplePIDController.hpp"
 #include "TrajectoryGenerator.hpp"
 
 #include <px4_platform_common/defines.h>
@@ -141,9 +141,9 @@ TrajectoryGenerator::Input _trajectory_input{};
 TrajectoryGenerator::Output _trajectory_output{};
 bool _trajectory_update_executed{false};
 
-GeometricController _geometric_controller{};
-GeometricController::Input _controller_input{};
-GeometricController::Output _geometric_output{};
+SimplePIDController _geometric_controller{};
+SimplePIDController::Input _controller_input{};
+SimplePIDController::Output _geometric_output{};
 bool _geometric_update_executed{false};
 
 L1AdaptiveState _l1_state{};
