@@ -4,8 +4,10 @@
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/module.h>
 #include <uORB/Publication.hpp>
+#include <uORB/Subscription.hpp>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/vehicle_command.h>
+#include <uORB/topics/vehicle_land_detected.h>
 
 #include <math.h>
 #include <poll.h>
@@ -72,6 +74,15 @@ void publish_manual_control(uORB::Publication<manual_control_setpoint_s> &publis
 	publisher.publish(manual);
 }
 
+void publish_arm_disarm_command(uORB::Publication<vehicle_command_s> &publisher, bool arm)
+{
+	vehicle_command_s command{};
+	command.timestamp = hrt_absolute_time();
+	command.command = vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM;
+	command.param1 = arm ? 1.f : 0.f;
+	publisher.publish(command);
+}
+
 void publish_motor_failure_command(uORB::Publication<vehicle_command_s> &publisher, uint8_t failure_type)
 {
 	vehicle_command_s command{};
@@ -89,13 +100,28 @@ int run_keyboard_throttle()
 	RawTerminalGuard terminal_guard;
 	uORB::Publication<manual_control_setpoint_s> manual_control_pub{ORB_ID(manual_control_setpoint)};
 	uORB::Publication<vehicle_command_s> vehicle_command_pub{ORB_ID(vehicle_command)};
+	uORB::Subscription vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	L1KeyboardThrottleState state{};
+	vehicle_land_detected_s vehicle_land_detected{};
+	bool auto_disarm_after_landing{false};
 
 	PX4_INFO("l1_keyboard_throttle started");
-	PX4_INFO("keys: w +0.2, s -0.2, x/space hold height, 0 fail motor 1, r restore motor 1, q quit");
-	PX4_INFO("throttle = %.1f", (double)state.throttle);
+	PX4_INFO("keys: 1 takeoff+hover, 2 auto-land, w/s height, x/space hold, 0 fail M1, r restore M1, q quit");
+	PX4_INFO("height stick = %.1f", (double)state.throttle);
 
 	while (true) {
+		if (vehicle_land_detected_sub.updated()) {
+			vehicle_land_detected_sub.copy(&vehicle_land_detected);
+		}
+
+		if (auto_disarm_after_landing && vehicle_land_detected.landed) {
+			publish_arm_disarm_command(vehicle_command_pub, false);
+			auto_disarm_after_landing = false;
+			state.throttle = 0.f;
+			publish_manual_control(manual_control_pub, state.throttle);
+			PX4_INFO("landing detected: disarm requested");
+		}
+
 		struct pollfd fds {};
 		fds.fd = STDIN_FILENO;
 		fds.events = POLLIN;
@@ -109,7 +135,18 @@ int run_keyboard_throttle()
 				const L1KeyboardThrottleAction action = handle_l1_keyboard_throttle_key(state, key);
 
 				if (action == L1KeyboardThrottleAction::PublishThrottle) {
-					PX4_INFO("throttle = %.1f", (double)state.throttle);
+					PX4_INFO("height stick = %.1f", (double)state.throttle);
+
+				} else if (action == L1KeyboardThrottleAction::TakeoffHover) {
+					auto_disarm_after_landing = false;
+					publish_arm_disarm_command(vehicle_command_pub, true);
+					publish_manual_control(manual_control_pub, L1_KEYBOARD_TAKEOFF_COMMAND_STICK);
+					PX4_INFO("takeoff requested: arm + climb to hover point");
+
+				} else if (action == L1KeyboardThrottleAction::Land) {
+					auto_disarm_after_landing = true;
+					publish_manual_control(manual_control_pub, L1_KEYBOARD_LAND_COMMAND_STICK);
+					PX4_INFO("automatic landing requested");
 
 				} else if (action == L1KeyboardThrottleAction::InjectMotorFailure) {
 					publish_motor_failure_command(vehicle_command_pub, vehicle_command_s::FAILURE_TYPE_OFF);
@@ -127,6 +164,8 @@ int run_keyboard_throttle()
 			}
 		}
 
+		// Normal periodic height-stick publication. The special 1/2 command
+		// values above are one-shot and therefore cannot continuously alter height.
 		publish_manual_control(manual_control_pub, state.throttle);
 	}
 }
@@ -135,6 +174,7 @@ void print_usage()
 {
 	PX4_INFO("Usage: l1_keyboard_throttle start");
 	PX4_INFO("       l1_keyboard_throttle help");
+	PX4_INFO("Keys: 1 takeoff+hover, 2 auto-land, w/s height, x/space hold, 0 fail M1, r restore M1, q quit");
 }
 
 } // namespace
