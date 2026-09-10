@@ -1,197 +1,113 @@
-# M1 Failure + Spin-Hover Experiment (`shut_m1`)
+# `shut_m1`: PID + L1 + M1 Failure Spin-Hover
 
-This branch is dedicated to a single-motor-out quadrotor experiment on PX4 v1.17.0.
+This branch is the PX4 v1.17.0 experiment for keyboard-controlled hover, automatic landing and single-M1 failure spin-hover.
 
-## 1. Current code entry points
+## Keyboard workflow
 
-### Keyboard node
-
-`l1_keyboard_throttle/L1KeyboardThrottle.cpp`
-
-- `w`: increase height-control stick by 0.2
-- `s`: decrease height-control stick by 0.2
-- `x` / space: return height-control stick to zero
-- `0`: inject Motor 1 OFF failure
-- `r`: restore Motor 1
-- `q`: quit
-
-The motor failure command is published as `VEHICLE_CMD_INJECT_FAILURE` with:
-
-- `FAILURE_UNIT_SYSTEM_MOTOR`
-- `FAILURE_TYPE_OFF` / `FAILURE_TYPE_OK`
-- motor instance `1`
-
-### PID baseline controller + L1 entry
-
-`l1_adaptive_control/L1AdaptiveControl.cpp`
-
-The main loop is:
+`l1_keyboard_throttle` now uses:
 
 ```text
-trajectory generator
-    -> update_pid_input()
-    -> run_pid_controller()
-    -> run_l1_adaptive_augmentation()
-    -> publish_control_setpoints()
+1        arm + take off from the current point + hover at 1 m
+2        automatic smooth landing; disarm after PX4 confirms landed
+w        increase height command
+s        decrease height command
+x/space  return height stick to zero and hold the current height reference
+0        inject Motor 1 OFF failure
+r        restore Motor 1
+q        quit the keyboard node
 ```
 
-The baseline controller is `SimplePIDController`. The old geometric-controller member and function names have been removed on this branch so the source now reflects the actual controller being executed.
+The `w/s` value is a vertical-height/velocity command to the trajectory generator. It is not direct raw motor PWM.
 
-The PID baseline controller outputs physical:
+## Trajectory
+
+`l1_adaptive_control/TrajectoryGenerator.cpp` no longer generates the old circle trajectory.
+
+The active state flow is:
 
 ```text
-[T, Mx, My, Mz]
+WaitForValidState
+      |
+      | keyboard 1
+      v
+   Takeoff
+      |
+      v
+    Hover  <---- w/s modifies the hover altitude
+      |
+      | keyboard 2
+      v
+   Landing
+      |
+      v
+    Landed
 ```
 
-The L1 adaptive layer adds its correction and the module publishes:
+Key `1` is latched even if PX4 Commander is still completing the arm request. The takeoff start point and ground reference are captured from the current local NED position. The default target is 1 m above that captured point and the takeoff transition lasts 2 s.
+
+Key `2` captures the current position and starts a 4 s fifth-order smoothstep descent to the captured ground plane. During landing, `w/s` cannot override the descent. After the descent, the target is biased slightly below the ground reference so the vertical loop reduces thrust while PX4's land detector confirms touchdown. The keyboard node then sends a normal `VEHICLE_CMD_COMPONENT_ARM_DISARM` disarm request.
+
+The historical `CommandedMode::Circle` enum value is retained only so the existing L1 wrapper still compiles; `TrajectoryGenerator::set_commanded_mode()` maps it back to hover and no circle motion is produced.
+
+## Controller path
 
 ```text
-vehicle_thrust_setpoint
-vehicle_torque_setpoint
+TrajectoryGenerator
+    -> SimplePIDController
+    -> L1 adaptive augmentation
+    -> vehicle_thrust_setpoint / vehicle_torque_setpoint
+    -> PX4 control_allocator
+    -> actuator_motors
 ```
 
-### PX4 mixer / allocator
+The PID branch uses yaw-relaxed control for the M1 spin-hover experiment. Horizontal NED correction is transformed with the current yaw, so roll/pitch corrections remain aligned with the world-frame position error while the body spins.
 
-PX4 v1.17 does not use the old text mixer as the normal multicopter path. The relevant mixer is:
+## M1 failure
 
-```text
-src/modules/control_allocator/ControlAllocator.cpp
-```
-
-The allocator converts `vehicle_thrust_setpoint` + `vehicle_torque_setpoint` into `actuator_motors`.
-
-PX4 normally stops an injected motor but does not necessarily remove the injected stopped motor from the allocation effectiveness matrix. This branch therefore provides:
+Key `0` still publishes `VEHICLE_CMD_INJECT_FAILURE` for Motor instance 1. Apply:
 
 ```text
 patches/px4-v1.17.0-m1-spin-hover-control-allocation.patch
 ```
 
-The patch does two experiment-specific things after a single motor is stopped:
-
-1. removes the stopped motor from the effectiveness matrix;
-2. zeros the yaw-effectiveness row, so the remaining motors prioritize collective thrust, roll and pitch.
-
-## 2. Why yaw must be released
-
-A normal quadrotor has four motor inputs and can command approximately:
+to the PX4 v1.17.0 tree. The patch removes the stopped motor from the effectiveness matrix and removes yaw authority after a single motor failure so the remaining three motors prioritize:
 
 ```text
-collective thrust + roll + pitch + yaw
+collective thrust + roll + pitch
 ```
 
-After M1 is lost only three independent motor inputs remain. Trying to keep all four outputs controlled is over-constrained.
+Yaw is intentionally released and the vehicle is allowed to spin.
 
-This branch therefore uses the standard spin-hover idea:
-
-```text
-keep:    thrust, roll, pitch
-release: yaw angle / yaw torque
-```
-
-The vehicle is allowed to spin around the vertical axis while position/altitude and thrust-vector direction are controlled.
-
-## 3. Spin-hover PID changes
-
-`l1_adaptive_control/SimplePIDController.cpp`
-
-The translational loop is:
-
-```text
-position error + velocity error + trajectory acceleration
-    -> desired acceleration in NED
-```
-
-For horizontal control, desired roll/pitch are calculated using the **current yaw** rather than a fixed yaw target. This is essential because the body frame continuously rotates during spin-hover.
-
-Yaw behavior is deliberately relaxed:
-
-```text
-desired_yaw = current_yaw
-yaw attitude error = 0
-yaw rate error = 0
-Mz_PID = 0
-```
-
-The patched allocator also removes yaw from the control effectiveness matrix after the motor-out event, so any downstream L1 yaw correction cannot steal authority from thrust/roll/pitch.
-
-## 4. Apply to a PX4 v1.17.0 checkout
-
-From the PX4 tree:
-
-```bash
-cd ~/px4_ws/PX4-Autopilot-v1.17.0
-
-git checkout v1.17.0
-
-mkdir -p src/modules/l1_adaptive_control
-cp -r ../Ardupoilt-to-PX4/l1_adaptive_control/* src/modules/l1_adaptive_control/
-
-mkdir -p src/modules/l1_keyboard_throttle
-cp -r ../Ardupoilt-to-PX4/l1_keyboard_throttle/* src/modules/l1_keyboard_throttle/
-
-git apply ../Ardupoilt-to-PX4/patches/px4-v1.17.0-m1-spin-hover-control-allocation.patch
-```
-
-Enable the two modules in the board configuration as in the repository README.
-
-## 5. Required PX4 parameters for failure injection
-
-In the PX4 shell:
+Required PX4 parameters for the failure-injection path:
 
 ```sh
 param set SYS_FAILURE_EN 1
 param set CA_FAILURE_MODE 1
 ```
 
-`CA_FAILURE_MODE=1` is required so the allocator processes the motor failure path.
-
-## 6. Recommended SIH test sequence
-
-Build and start SIH first:
-
-```bash
-make px4_sitl sihsim_quadx
-```
-
-Then in the PX4 shell:
+## Recommended SIH sequence
 
 ```sh
 mc_rate_control stop
 l1_adaptive_control start
-commander arm
-```
-
-Allow takeoff to finish and confirm normal hover. Then start the keyboard node:
-
-```sh
 l1_keyboard_throttle start
 ```
 
-Press:
+Then use the keyboard:
 
 ```text
-0
+1   -> takeoff and hover
+w/s -> change hover altitude
+0   -> fail M1 and enter the spin-hover experiment
+2   -> land from the current hover point
 ```
 
-to shut down M1.
-
-Expected behavior after the transient:
-
-- M1 is stopped;
-- M2/M3/M4 remain active;
-- yaw angle is not held;
-- the vehicle develops a continuous yaw spin;
-- roll/pitch and vertical thrust continue trying to hold the hover point.
-
-Press `r` to restore M1.
-
-## 7. Signals to inspect
-
-Use these listeners during the test:
+Useful listeners:
 
 ```sh
 listener actuator_motors 1
 listener control_allocator_status 1
+listener vehicle_land_detected 1
 listener vehicle_attitude 1
 listener vehicle_angular_velocity 1
 listener vehicle_local_position 1
@@ -199,10 +115,6 @@ listener vehicle_thrust_setpoint 1
 listener vehicle_torque_setpoint 1
 ```
 
-For Motor 1 failure, the allocator masks should indicate the first motor (bit 0), while the vehicle yaw rate should become non-zero and roll/pitch/position remain bounded.
+## Scope
 
-## 8. Safety / scope
-
-This is an experimental fault-tolerant control branch, not a validated real-flight configuration.
-
-The PID gains, 3 kg mass, thrust normalization constants, inertia and L1 gains in this repository are still research/SITL values. Validate in SIH/SITL first. Do not move directly to propellers-on hardware testing without checking motor numbering, rotation direction, geometry parameters, actuator limits, estimator behavior during fast yaw spin and kill/disarm behavior.
+This remains an experimental fault-tolerant controller. The PID gains, 3 kg mass, thrust normalization, inertia and L1 gains are research/SIH values. Validate the complete workflow in SIH/SITL before any propellers-on hardware test, especially the M1 numbering, motor rotation directions, allocator geometry, fast-yaw estimator behavior and landing/disarm behavior.
