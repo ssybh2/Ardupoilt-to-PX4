@@ -142,8 +142,8 @@ apply_trajectory_command();
 update_trajectory_input();
 run_trajectory_generator();
 
-update_controller_input();
-run_geometric_controller();
+update_pid_input();
+run_pid_controller();
 run_l1_adaptive_augmentation();
 publish_control_setpoints();
 
@@ -292,39 +292,39 @@ _manual_height_stick = math::constrain(_manual_control_setpoint.throttle, -1.f, 
 _manual_height_control_valid = true;
 }
 
-void L1AdaptiveControl::update_controller_input()
+void L1AdaptiveControl::update_pid_input()
 {
-_controller_input.timestamp_us = _state.timestamp_us;
+_pid_input.timestamp_us = _state.timestamp_us;
 
 for (int i = 0; i < 3; i++) {
-_controller_input.position_ned[i] = _state.position_ned[i];
-_controller_input.velocity_ned[i] = _state.velocity_ned[i];
-_controller_input.angular_velocity_body[i] = _state.angular_velocity_body[i];
+_pid_input.position_ned[i] = _state.position_ned[i];
+_pid_input.velocity_ned[i] = _state.velocity_ned[i];
+_pid_input.angular_velocity_body[i] = _state.angular_velocity_body[i];
 
-_controller_input.target_position_ned[i] = _trajectory_output.position_ned[i];
-_controller_input.target_velocity_ned[i] = _trajectory_output.velocity_ned[i];
-_controller_input.target_acceleration_ned[i] = _trajectory_output.acceleration_ned[i];
-_controller_input.target_jerk_ned[i] = _trajectory_output.jerk_ned[i];
-_controller_input.target_snap_ned[i] = _trajectory_output.snap_ned[i];
+_pid_input.target_position_ned[i] = _trajectory_output.position_ned[i];
+_pid_input.target_velocity_ned[i] = _trajectory_output.velocity_ned[i];
+_pid_input.target_acceleration_ned[i] = _trajectory_output.acceleration_ned[i];
+_pid_input.target_jerk_ned[i] = _trajectory_output.jerk_ned[i];
+_pid_input.target_snap_ned[i] = _trajectory_output.snap_ned[i];
 }
 
 for (int i = 0; i < 4; i++) {
-_controller_input.quat_body_to_ned[i] = _state.quat_body_to_ned[i];
+_pid_input.quat_body_to_ned[i] = _state.quat_body_to_ned[i];
 }
 
-_controller_input.target_yaw = _trajectory_output.yaw;
-_controller_input.target_yaw_rate = _trajectory_output.yaw_rate;
-_controller_input.target_yaw_accel = _trajectory_output.yaw_accel;
+_pid_input.target_yaw = _trajectory_output.yaw;
+_pid_input.target_yaw_rate = _trajectory_output.yaw_rate;
+_pid_input.target_yaw_accel = _trajectory_output.yaw_accel;
 
-_controller_input.state_valid_for_control = _state_valid_for_control && _trajectory_output.valid;
-_controller_input.armed = _state.armed;
-_controller_input.failsafe = _state.failsafe;
-_controller_input.nav_state = _state.nav_state;
+_pid_input.state_valid_for_control = _state_valid_for_control && _trajectory_output.valid;
+_pid_input.armed = _state.armed;
+_pid_input.failsafe = _state.failsafe;
+_pid_input.nav_state = _state.nav_state;
 }
 
-void L1AdaptiveControl::run_geometric_controller()
+void L1AdaptiveControl::run_pid_controller()
 {
-_geometric_update_executed = _geometric_controller.update(_controller_input, _geometric_output);
+_pid_update_executed = _pid_controller.update(_pid_input, _pid_output);
 }
 
 void L1AdaptiveControl::reset_l1_adaptive_state()
@@ -345,7 +345,7 @@ void L1AdaptiveControl::run_l1_adaptive_augmentation()
 		_combined_thrust_moment[i] = 0.f;
 	}
 
-	if (!_geometric_output.valid || !_state_valid_for_control || !_state.armed || _state.failsafe) {
+	if (!_pid_output.valid || !_state_valid_for_control || !_state.armed || _state.failsafe) {
 		reset_l1_adaptive_state();
 		return;
 	}
@@ -354,10 +354,10 @@ void L1AdaptiveControl::run_l1_adaptive_augmentation()
 	quat_to_rotation_matrix_body_to_ned(_state.quat_body_to_ned, R);
 
 	const float baseline_thrust_moment[4] = {
-		_geometric_output.thrust_newton,
-		_geometric_output.moment_newton_meter[0],
-		_geometric_output.moment_newton_meter[1],
-		_geometric_output.moment_newton_meter[2]
+		_pid_output.thrust_newton,
+		_pid_output.moment_newton_meter[0],
+		_pid_output.moment_newton_meter[1],
+		_pid_output.moment_newton_meter[2]
 	};
 
 	if (!_l1_state.initialized) {
@@ -532,7 +532,7 @@ void L1AdaptiveControl::publish_control_setpoints()
 {
 	_control_setpoint_published = false;
 
-	if (!_geometric_output.valid || !_state_valid_for_control || !_state.armed || _state.failsafe) {
+	if (!_pid_output.valid || !_state_valid_for_control || !_state.armed || _state.failsafe) {
 		for (int i = 0; i < 3; i++) {
 			_published_thrust_body[i] = 0.f;
 			_published_torque_body[i] = 0.f;
@@ -600,9 +600,9 @@ PX4_INFO("   rc_height=%d manual=%d valid=%d throttle=%.2f | subs lp/att/omega/s
  (int)_has_angular_velocity,
  (int)_has_vehicle_status);
 
-PX4_INFO("   controller: traj=%d geo=%d l1=%d publish=%d count=%u",
+PX4_INFO("   controller: traj=%d pid=%d l1=%d publish=%d count=%u",
  (int)_trajectory_update_executed,
- (int)_geometric_update_executed,
+ (int)_pid_update_executed,
  (int)_l1_update_executed,
  (int)_control_setpoint_published,
  (unsigned)_control_setpoint_publish_count);
@@ -666,9 +666,9 @@ PX4_INFO("  rc height: enabled=%d received=%d valid=%d throttle=%.3f",
  (int)_manual_height_control_valid,
  (double)_manual_height_stick);
 
-PX4_INFO("  pipeline: traj=%d geo=%d l1=%d publish=%d count=%u",
+PX4_INFO("  pipeline: traj=%d pid=%d l1=%d publish=%d count=%u",
  (int)_trajectory_update_executed,
- (int)_geometric_update_executed,
+ (int)_pid_update_executed,
  (int)_l1_update_executed,
  (int)_control_setpoint_published,
  (unsigned)_control_setpoint_publish_count);
@@ -807,8 +807,8 @@ Current stage:
 - Subscribe vehicle_status
 - Convert uORB messages into internal controller state
 - Generate takeoff-hover/circle trajectory
-- Convert trajectory output into GeometricController input
-- Run geometric controller
+- Convert trajectory output into SimplePIDController input
+- Run yaw-relaxed PID baseline controller
 - Run L1 adaptive augmentation
 - Publish vehicle_thrust_setpoint and vehicle_torque_setpoint for PX4 control_allocator
 - Switch post-takeoff trajectory between hover and fixed-yaw circle
