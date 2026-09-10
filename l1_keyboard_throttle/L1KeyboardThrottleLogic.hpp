@@ -41,10 +41,12 @@ static inline float constrain_l1_keyboard_throttle(float value)
 static inline L1KeyboardThrottleAction handle_l1_keyboard_throttle_key(L1KeyboardThrottleState &state, char key)
 {
 	if (key == '1') {
+		state.throttle = 0.f;
 		return L1KeyboardThrottleAction::TakeoffHover;
 	}
 
 	if (key == '2') {
+		state.throttle = 0.f;
 		return L1KeyboardThrottleAction::Land;
 	}
 
