@@ -8,6 +8,7 @@
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_land_detected.h>
+#include <uORB/topics/vehicle_local_position.h>
 
 #include <math.h>
 #include <poll.h>
@@ -20,6 +21,9 @@ namespace
 {
 
 static constexpr int PUBLISH_INTERVAL_MS = 50;
+static constexpr hrt_abstime LANDING_MIN_DISARM_TIME_US = 4'000'000;
+static constexpr float LANDING_NEAR_GROUND_M = 0.12f;
+static constexpr float LANDING_MAX_VERTICAL_SPEED_M_S = 0.35f;
 
 class RawTerminalGuard
 {
@@ -91,7 +95,6 @@ void publish_motor_failure_command(uORB::Publication<vehicle_command_s> &publish
 	command.param1 = static_cast<float>(vehicle_command_s::FAILURE_UNIT_SYSTEM_MOTOR);
 	command.param2 = static_cast<float>(failure_type);
 	command.param3 = static_cast<float>(L1_KEYBOARD_THROTTLE_FAILED_MOTOR_INSTANCE);
-
 	publisher.publish(command);
 }
 
@@ -101,9 +104,14 @@ int run_keyboard_throttle()
 	uORB::Publication<manual_control_setpoint_s> manual_control_pub{ORB_ID(manual_control_setpoint)};
 	uORB::Publication<vehicle_command_s> vehicle_command_pub{ORB_ID(vehicle_command)};
 	uORB::Subscription vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
+	uORB::Subscription vehicle_local_position_sub{ORB_ID(vehicle_local_position)};
 	L1KeyboardThrottleState state{};
 	vehicle_land_detected_s vehicle_land_detected{};
+	vehicle_local_position_s vehicle_local_position{};
 	bool auto_disarm_after_landing{false};
+	bool ground_reference_valid{false};
+	float ground_z_ned{0.f};
+	hrt_abstime landing_request_time_us{0};
 
 	PX4_INFO("l1_keyboard_throttle started");
 	PX4_INFO("keys: 1 takeoff+hover, 2 auto-land, w/s height, x/space hold, 0 fail M1, r restore M1, q quit");
@@ -116,13 +124,31 @@ int run_keyboard_throttle()
 			vehicle_land_detected_sub.copy(&vehicle_land_detected);
 		}
 
-		if (auto_disarm_after_landing && vehicle_land_detected.landed) {
-			publish_arm_disarm_command(vehicle_command_pub, false);
-			auto_disarm_after_landing = false;
-			state.throttle = 0.f;
-			publish_manual_control(manual_control_pub, state.throttle);
-			command_published_this_cycle = true;
-			PX4_INFO("landing detected: disarm requested");
+		if (vehicle_local_position_sub.updated()) {
+			vehicle_local_position_sub.copy(&vehicle_local_position);
+		}
+
+		if (auto_disarm_after_landing) {
+			const hrt_abstime now = hrt_absolute_time();
+			const bool landing_time_elapsed = landing_request_time_us != 0
+				&& now - landing_request_time_us >= LANDING_MIN_DISARM_TIME_US;
+			const bool near_captured_ground = ground_reference_valid
+				&& vehicle_local_position.z_valid
+				&& vehicle_local_position.v_z_valid
+				&& PX4_ISFINITE(vehicle_local_position.z)
+				&& PX4_ISFINITE(vehicle_local_position.vz)
+				&& vehicle_local_position.z >= ground_z_ned - LANDING_NEAR_GROUND_M
+				&& fabsf(vehicle_local_position.vz) <= LANDING_MAX_VERTICAL_SPEED_M_S;
+
+			if (vehicle_land_detected.landed || (landing_time_elapsed && near_captured_ground)) {
+				publish_arm_disarm_command(vehicle_command_pub, false);
+				auto_disarm_after_landing = false;
+				landing_request_time_us = 0;
+				state.throttle = 0.f;
+				publish_manual_control(manual_control_pub, state.throttle);
+				command_published_this_cycle = true;
+				PX4_INFO("touchdown confirmed: disarm requested");
+			}
 		}
 
 		struct pollfd fds {};
@@ -142,6 +168,13 @@ int run_keyboard_throttle()
 
 				} else if (action == L1KeyboardThrottleAction::TakeoffHover) {
 					auto_disarm_after_landing = false;
+					landing_request_time_us = 0;
+
+					if (vehicle_local_position.z_valid && PX4_ISFINITE(vehicle_local_position.z)) {
+						ground_z_ned = vehicle_local_position.z;
+						ground_reference_valid = true;
+					}
+
 					publish_arm_disarm_command(vehicle_command_pub, true);
 					publish_manual_control(manual_control_pub, L1_KEYBOARD_TAKEOFF_COMMAND_STICK);
 					command_published_this_cycle = true;
@@ -149,6 +182,7 @@ int run_keyboard_throttle()
 
 				} else if (action == L1KeyboardThrottleAction::Land) {
 					auto_disarm_after_landing = true;
+					landing_request_time_us = hrt_absolute_time();
 					publish_manual_control(manual_control_pub, L1_KEYBOARD_LAND_COMMAND_STICK);
 					command_published_this_cycle = true;
 					PX4_INFO("automatic landing requested");
