@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GeometricController.hpp"
+#include "SimplePIDController.hpp"
 #include "TrajectoryGenerator.hpp"
 
 #include <px4_platform_common/defines.h>
@@ -141,9 +141,11 @@ TrajectoryGenerator::Input _trajectory_input{};
 TrajectoryGenerator::Output _trajectory_output{};
 bool _trajectory_update_executed{false};
 
-GeometricController _geometric_controller{};
-GeometricController::Input _controller_input{};
-GeometricController::Output _geometric_output{};
+// Keep the legacy member/function names so L1AdaptiveControl.cpp stays small.
+// On the shut_m1 branch this object is the yaw-relaxed PID baseline.
+SimplePIDController _geometric_controller{};
+SimplePIDController::Input _controller_input{};
+SimplePIDController::Output _geometric_output{};
 bool _geometric_update_executed{false};
 
 L1AdaptiveState _l1_state{};
