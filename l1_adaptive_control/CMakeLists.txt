@@ -5,8 +5,8 @@ COMPILE_FLAGS
 SRCS
 L1AdaptiveControl.cpp
 L1AdaptiveControl.hpp
-GeometricController.cpp
-GeometricController.hpp
+SimplePIDController.cpp
+SimplePIDController.hpp
 TrajectoryGenerator.cpp
 TrajectoryGenerator.hpp
 DEPENDS
@@ -14,4 +14,4 @@ px4_work_queue
 )
 
 px4_add_unit_gtest(SRC TrajectoryGeneratorTest.cpp EXTRA_SRCS TrajectoryGenerator.cpp)
-px4_add_unit_gtest(SRC GeometricControllerTest.cpp EXTRA_SRCS GeometricController.cpp)
+px4_add_unit_gtest(SRC SimplePIDControllerTest.cpp EXTRA_SRCS SimplePIDController.cpp)
