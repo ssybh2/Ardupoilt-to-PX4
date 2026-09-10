@@ -128,7 +128,10 @@ bool _has_angular_velocity{false};
 bool _has_manual_control_setpoint{false};
 bool _has_vehicle_status{false};
 
-px4::atomic_bool _rc_height_control_enabled{false};
+// Keyboard control is part of the default shut_m1 workflow. w/s are treated as
+// vertical-velocity/height commands, while 1/2 use reserved one-shot values to
+// request takeoff-hover and landing from TrajectoryGenerator.
+px4::atomic_bool _rc_height_control_enabled{true};
 px4::atomic<uint8_t> _trajectory_command_mode{static_cast<uint8_t>(TrajectoryGenerator::CommandedMode::Hover)};
 bool _manual_height_control_valid{false};
 float _manual_height_stick{0.f};
