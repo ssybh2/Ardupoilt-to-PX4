@@ -110,6 +110,8 @@ int run_keyboard_throttle()
 	PX4_INFO("height stick = %.1f", (double)state.throttle);
 
 	while (true) {
+		bool command_published_this_cycle{false};
+
 		if (vehicle_land_detected_sub.updated()) {
 			vehicle_land_detected_sub.copy(&vehicle_land_detected);
 		}
@@ -119,6 +121,7 @@ int run_keyboard_throttle()
 			auto_disarm_after_landing = false;
 			state.throttle = 0.f;
 			publish_manual_control(manual_control_pub, state.throttle);
+			command_published_this_cycle = true;
 			PX4_INFO("landing detected: disarm requested");
 		}
 
@@ -141,11 +144,13 @@ int run_keyboard_throttle()
 					auto_disarm_after_landing = false;
 					publish_arm_disarm_command(vehicle_command_pub, true);
 					publish_manual_control(manual_control_pub, L1_KEYBOARD_TAKEOFF_COMMAND_STICK);
+					command_published_this_cycle = true;
 					PX4_INFO("takeoff requested: arm + climb to hover point");
 
 				} else if (action == L1KeyboardThrottleAction::Land) {
 					auto_disarm_after_landing = true;
 					publish_manual_control(manual_control_pub, L1_KEYBOARD_LAND_COMMAND_STICK);
+					command_published_this_cycle = true;
 					PX4_INFO("automatic landing requested");
 
 				} else if (action == L1KeyboardThrottleAction::InjectMotorFailure) {
@@ -164,9 +169,11 @@ int run_keyboard_throttle()
 			}
 		}
 
-		// Normal periodic height-stick publication. The special 1/2 command
-		// values above are one-shot and therefore cannot continuously alter height.
-		publish_manual_control(manual_control_pub, state.throttle);
+		// Do not overwrite a one-shot 1/2 command in the same cycle. On the next
+		// 50 ms cycle normal height-stick publication resumes automatically.
+		if (!command_published_this_cycle) {
+			publish_manual_control(manual_control_pub, state.throttle);
+		}
 	}
 }
 
