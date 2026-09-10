@@ -98,8 +98,8 @@ void run_trajectory_generator();
 void update_manual_height_control_input();
 void apply_trajectory_command();
 
-void update_controller_input();
-void run_geometric_controller();
+void update_pid_input();
+void run_pid_controller();
 
 void reset_l1_adaptive_state();
 void run_l1_adaptive_augmentation();
@@ -141,12 +141,10 @@ TrajectoryGenerator::Input _trajectory_input{};
 TrajectoryGenerator::Output _trajectory_output{};
 bool _trajectory_update_executed{false};
 
-// Keep the legacy member/function names so L1AdaptiveControl.cpp stays small.
-// On the shut_m1 branch this object is the yaw-relaxed PID baseline.
-SimplePIDController _geometric_controller{};
-SimplePIDController::Input _controller_input{};
-SimplePIDController::Output _geometric_output{};
-bool _geometric_update_executed{false};
+SimplePIDController _pid_controller{};
+SimplePIDController::Input _pid_input{};
+SimplePIDController::Output _pid_output{};
+bool _pid_update_executed{false};
 
 L1AdaptiveState _l1_state{};
 float _l1_output_thrust_moment[4]{0.f, 0.f, 0.f, 0.f};
