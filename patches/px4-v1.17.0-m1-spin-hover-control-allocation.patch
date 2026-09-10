@@ -1,0 +1,48 @@
+diff --git a/src/modules/control_allocator/ControlAllocator.cpp b/src/modules/control_allocator/ControlAllocator.cpp
+--- a/src/modules/control_allocator/ControlAllocator.cpp
++++ b/src/modules/control_allocator/ControlAllocator.cpp
+@@ -574,6 +574,15 @@ ControlAllocator::update_effectiveness_matrix_if_needed(EffectivenessUpdateReason reason)
+ 
+ 			ActuatorEffectiveness::EffectivenessMatrix &matrix = config.effectiveness_matrices[i];
+ 
++			// Single-motor-out spin-hover: yaw is intentionally uncontrolled.
++			// With one motor removed only three independent motor inputs remain, so
++			// preserve collective thrust, roll and pitch authority and do not spend
++			// actuator authority trying to satisfy an impossible yaw command.
++			if (_effectiveness_source_id == EffectivenessSource::MULTIROTOR
++			    && math::countSetBits(_handled_motor_failure_bitmask) == 1) {
++				matrix.row(2) = 0.f;
++			}
++
+ 			for (int n = 0; n < NUM_AXES; n++) {
+ 				bool all_entries_small = true;
+ 
+@@ -724,14 +733,20 @@ ControlAllocator::check_for_motor_failures()
+ 			PX4_WARN("Stopping motors (%d)", _motor_stop_mask);
+ 		}
+ 
+-		if (failure_detector_status.fd_motor) {
+-			if (_handled_motor_failure_bitmask != failure_detector_status.motor_failure_mask) {
++		// Treat an injected stopped motor as an allocation failure as well. PX4
++		// normally stops an injected motor without removing it from the
++		// effectiveness matrix; for this experiment we deliberately remove the
++		// single stopped motor so the remaining three motors are re-allocated.
++		const uint32_t motor_failure_mask =
++			(failure_detector_status.fd_motor ? failure_detector_status.motor_failure_mask : 0u) | _motor_stop_mask;
++
++		if (motor_failure_mask != 0) {
++			if (_handled_motor_failure_bitmask != motor_failure_mask) {
+ 				// motor failure bitmask changed
+ 				switch ((FailureMode)_param_ca_failure_mode.get()) {
+ 				case FailureMode::REMOVE_FIRST_FAILING_MOTOR: {
+ 						// Count number of failed motors
+-						const int num_motors_failed = math::countSetBits(failure_detector_status.motor_failure_mask);
++						const int num_motors_failed = math::countSetBits(motor_failure_mask);
+ 
+ 						// Only handle if it is the first failure
+ 						if (_handled_motor_failure_bitmask == 0 && num_motors_failed == 1) {
+-							_handled_motor_failure_bitmask = failure_detector_status.motor_failure_mask;
++							_handled_motor_failure_bitmask = motor_failure_mask;
+ 							PX4_WARN("Removing motor from allocation (0x%x)", _handled_motor_failure_bitmask);
+ 
+ 							for (int i = 0; i < _num_control_allocation; ++i) {
