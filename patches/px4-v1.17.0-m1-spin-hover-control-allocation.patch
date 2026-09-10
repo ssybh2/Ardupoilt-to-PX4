@@ -17,7 +17,7 @@ diff --git a/src/modules/control_allocator/ControlAllocator.cpp b/src/modules/co
  			for (int n = 0; n < NUM_AXES; n++) {
  				bool all_entries_small = true;
  
-@@ -724,14 +733,20 @@ ControlAllocator::check_for_motor_failures()
+@@ -724,17 +733,24 @@ ControlAllocator::check_for_motor_failures()
  			PX4_WARN("Stopping motors (%d)", _motor_stop_mask);
  		}
  
