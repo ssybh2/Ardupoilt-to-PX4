@@ -2,6 +2,18 @@
 
 #include <gtest/gtest.h>
 
+TEST(L1KeyboardThrottleLogic, UsesNormalDisarmWhenLandDetectorConfirmsTouchdown)
+{
+	EXPECT_EQ(decide_l1_keyboard_disarm(true, true, true), L1KeyboardDisarmAction::Normal);
+}
+
+TEST(L1KeyboardThrottleLogic, UsesForcedDisarmForTimedNearGroundFallback)
+{
+	EXPECT_EQ(decide_l1_keyboard_disarm(false, true, true), L1KeyboardDisarmAction::Force);
+	EXPECT_EQ(decide_l1_keyboard_disarm(false, false, true), L1KeyboardDisarmAction::None);
+	EXPECT_EQ(decide_l1_keyboard_disarm(false, true, false), L1KeyboardDisarmAction::None);
+}
+
 TEST(L1KeyboardThrottleLogic, OneRequestsTakeoffAndNeutralizesHeightStick)
 {
 	L1KeyboardThrottleState state{};
@@ -12,6 +24,11 @@ TEST(L1KeyboardThrottleLogic, OneRequestsTakeoffAndNeutralizesHeightStick)
 	EXPECT_EQ(action, L1KeyboardThrottleAction::TakeoffHover);
 	EXPECT_FLOAT_EQ(state.throttle, 0.f);
 	EXPECT_FLOAT_EQ(L1_KEYBOARD_TAKEOFF_COMMAND_STICK, 0.97f);
+	EXPECT_TRUE(state.takeoff_pending);
+	EXPECT_FALSE(consume_l1_keyboard_takeoff_command(state, false));
+	EXPECT_TRUE(state.takeoff_pending);
+	EXPECT_TRUE(consume_l1_keyboard_takeoff_command(state, true));
+	EXPECT_FALSE(state.takeoff_pending);
 }
 
 TEST(L1KeyboardThrottleLogic, TwoRequestsLandingAndNeutralizesHeightStick)

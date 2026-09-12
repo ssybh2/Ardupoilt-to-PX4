@@ -21,9 +21,40 @@ enum class L1KeyboardThrottleAction {
 	Quit
 };
 
+enum class L1KeyboardDisarmAction {
+	None = 0,
+	Normal,
+	Force
+};
+
+static inline L1KeyboardDisarmAction decide_l1_keyboard_disarm(bool landed,
+		bool landing_time_elapsed, bool near_captured_ground)
+{
+	if (landed) {
+		return L1KeyboardDisarmAction::Normal;
+	}
+
+	if (landing_time_elapsed && near_captured_ground) {
+		return L1KeyboardDisarmAction::Force;
+	}
+
+	return L1KeyboardDisarmAction::None;
+}
+
 struct L1KeyboardThrottleState {
 	float throttle{0.f};
+	bool takeoff_pending{false};
 };
+
+static inline bool consume_l1_keyboard_takeoff_command(L1KeyboardThrottleState &state, bool armed)
+{
+	if (!state.takeoff_pending || !armed) {
+		return false;
+	}
+
+	state.takeoff_pending = false;
+	return true;
+}
 
 static inline float constrain_l1_keyboard_throttle(float value)
 {
@@ -42,11 +73,13 @@ static inline L1KeyboardThrottleAction handle_l1_keyboard_throttle_key(L1Keyboar
 {
 	if (key == '1') {
 		state.throttle = 0.f;
+		state.takeoff_pending = true;
 		return L1KeyboardThrottleAction::TakeoffHover;
 	}
 
 	if (key == '2') {
 		state.throttle = 0.f;
+		state.takeoff_pending = false;
 		return L1KeyboardThrottleAction::Land;
 	}
 
@@ -75,6 +108,7 @@ static inline L1KeyboardThrottleAction handle_l1_keyboard_throttle_key(L1Keyboar
 
 	if (key == 'q' || key == 'Q' || key == 0x03 || key == 0x1b) {
 		state.throttle = 0.f;
+		state.takeoff_pending = false;
 		return L1KeyboardThrottleAction::Quit;
 	}
 

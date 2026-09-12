@@ -10,6 +10,7 @@
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/vehicle_status.h>
 
 #include <math.h>
 #include <poll.h>
@@ -23,6 +24,7 @@ namespace
 
 static constexpr int PUBLISH_INTERVAL_MS = 50;
 static constexpr hrt_abstime LANDING_MIN_DISARM_TIME_US = 4'000'000;
+static constexpr hrt_abstime DISARM_RETRY_INTERVAL_US = 500'000;
 static constexpr float LANDING_NEAR_GROUND_M = 0.12f;
 static constexpr float LANDING_MAX_VERTICAL_SPEED_M_S = 0.35f;
 
@@ -79,12 +81,13 @@ void publish_manual_control(uORB::Publication<manual_control_setpoint_s> &publis
 	publisher.publish(manual);
 }
 
-void publish_arm_disarm_command(uORB::Publication<vehicle_command_s> &publisher, bool arm)
+void publish_arm_disarm_command(uORB::Publication<vehicle_command_s> &publisher, bool arm, bool force = false)
 {
 	vehicle_command_s command{};
 	command.timestamp = hrt_absolute_time();
 	command.command = vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM;
 	command.param1 = arm ? 1.f : 0.f;
+	command.param2 = force ? 21196.f : 0.f;
 	publisher.publish(command);
 }
 
@@ -106,13 +109,16 @@ int run_keyboard_throttle()
 	uORB::Publication<vehicle_command_s> vehicle_command_pub{ORB_ID(vehicle_command)};
 	uORB::Subscription vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription vehicle_local_position_sub{ORB_ID(vehicle_local_position)};
+	uORB::Subscription vehicle_status_sub{ORB_ID(vehicle_status)};
 	L1KeyboardThrottleState state{};
 	vehicle_land_detected_s vehicle_land_detected{};
 	vehicle_local_position_s vehicle_local_position{};
+	vehicle_status_s vehicle_status{};
 	bool auto_disarm_after_landing{false};
 	bool ground_reference_valid{false};
 	float ground_z_ned{0.f};
 	hrt_abstime landing_request_time_us{0};
+	hrt_abstime last_disarm_request_time_us{0};
 
 	PX4_INFO("l1_keyboard_throttle started");
 	PX4_INFO("keys: 1 takeoff+hover, 2 auto-land, w/s height, x/space hold, 0 fail M1, r restore M1, q quit");
@@ -129,7 +135,26 @@ int run_keyboard_throttle()
 			vehicle_local_position_sub.copy(&vehicle_local_position);
 		}
 
-		if (auto_disarm_after_landing) {
+		if (vehicle_status_sub.updated()) {
+			vehicle_status_sub.copy(&vehicle_status);
+		}
+
+		const bool armed = vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
+
+		if (consume_l1_keyboard_takeoff_command(state, armed)) {
+			publish_manual_control(manual_control_pub, L1_KEYBOARD_TAKEOFF_COMMAND_STICK);
+			command_published_this_cycle = true;
+			PX4_INFO("armed confirmed: takeoff trajectory requested");
+		}
+
+		if (auto_disarm_after_landing && !armed) {
+			auto_disarm_after_landing = false;
+			landing_request_time_us = 0;
+			last_disarm_request_time_us = 0;
+			state.throttle = 0.f;
+			PX4_INFO("touchdown confirmed: vehicle disarmed");
+
+		} else if (auto_disarm_after_landing) {
 			const hrt_abstime now = hrt_absolute_time();
 			const bool landing_time_elapsed = landing_request_time_us != 0
 				&& now - landing_request_time_us >= LANDING_MIN_DISARM_TIME_US;
@@ -141,14 +166,19 @@ int run_keyboard_throttle()
 				&& vehicle_local_position.z >= ground_z_ned - LANDING_NEAR_GROUND_M
 				&& fabsf(vehicle_local_position.vz) <= LANDING_MAX_VERTICAL_SPEED_M_S;
 
-			if (vehicle_land_detected.landed || (landing_time_elapsed && near_captured_ground)) {
-				publish_arm_disarm_command(vehicle_command_pub, false);
-				auto_disarm_after_landing = false;
-				landing_request_time_us = 0;
+			const L1KeyboardDisarmAction disarm_action = decide_l1_keyboard_disarm(
+				vehicle_land_detected.landed, landing_time_elapsed, near_captured_ground);
+			const bool retry_due = last_disarm_request_time_us == 0
+				|| now - last_disarm_request_time_us >= DISARM_RETRY_INTERVAL_US;
+
+			if (disarm_action != L1KeyboardDisarmAction::None && retry_due) {
+				const bool force = disarm_action == L1KeyboardDisarmAction::Force;
+				publish_arm_disarm_command(vehicle_command_pub, false, force);
+				last_disarm_request_time_us = now;
 				state.throttle = 0.f;
 				publish_manual_control(manual_control_pub, state.throttle);
 				command_published_this_cycle = true;
-				PX4_INFO("touchdown confirmed: disarm requested");
+				PX4_INFO("touchdown confirmed: %sdisarm requested", force ? "forced " : "");
 			}
 		}
 
@@ -177,13 +207,17 @@ int run_keyboard_throttle()
 					}
 
 					publish_arm_disarm_command(vehicle_command_pub, true);
-					publish_manual_control(manual_control_pub, L1_KEYBOARD_TAKEOFF_COMMAND_STICK);
+					// Commander must see centered throttle while processing the arm
+					// request. The reserved takeoff pulse is sent only after vehicle
+					// status confirms that arming completed.
+					publish_manual_control(manual_control_pub, state.throttle);
 					command_published_this_cycle = true;
-					PX4_INFO("takeoff requested: arm + climb to hover point");
+					PX4_INFO("takeoff requested: arming with centered throttle");
 
 				} else if (action == L1KeyboardThrottleAction::Land) {
 					auto_disarm_after_landing = true;
 					landing_request_time_us = hrt_absolute_time();
+					last_disarm_request_time_us = 0;
 					publish_manual_control(manual_control_pub, L1_KEYBOARD_LAND_COMMAND_STICK);
 					command_published_this_cycle = true;
 					PX4_INFO("automatic landing requested");
