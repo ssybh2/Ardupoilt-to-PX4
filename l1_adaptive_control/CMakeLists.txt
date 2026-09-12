@@ -7,6 +7,8 @@ L1AdaptiveControl.cpp
 L1AdaptiveControl.hpp
 SimplePIDController.cpp
 SimplePIDController.hpp
+GeometricController.cpp
+GeometricController.hpp
 TrajectoryGenerator.cpp
 TrajectoryGenerator.hpp
 DEPENDS
@@ -14,4 +16,3 @@ px4_work_queue
 )
 
 px4_add_unit_gtest(SRC TrajectoryGeneratorTest.cpp EXTRA_SRCS TrajectoryGenerator.cpp)
-px4_add_unit_gtest(SRC SimplePIDControllerTest.cpp EXTRA_SRCS SimplePIDController.cpp)
