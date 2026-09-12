@@ -1,77 +1,70 @@
 #pragma once
 
+#include "GeometricController.hpp"
+
 #include <drivers/drv_hrt.h>
 
 #include <stdint.h>
 
-// Simple PID baseline used by the single-motor-out spin-hover experiment.
-//
-// Control structure:
-//   position/velocity PD -> desired NED acceleration
-//   current-yaw acceleration mapping -> desired roll/pitch
-//   roll/pitch attitude PID with body-rate damping -> body moments
-//   yaw moment is deliberately released so a quadrotor can keep roll/pitch/thrust
-//   authority with only three motors and spin about the vertical axis.
+// Compatibility adapter retained so the shut_m1 L1 wrapper does not need to
+// change its public baseline-controller interface. Internally this class now
+// runs the DSun geometric controller.
 class SimplePIDController
 {
 public:
-struct Input {
-hrt_abstime timestamp_us{0};
+	struct Input {
+		hrt_abstime timestamp_us{0};
 
-float position_ned[3]{0.f, 0.f, 0.f};
-float velocity_ned[3]{0.f, 0.f, 0.f};
-float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};
-float angular_velocity_body[3]{0.f, 0.f, 0.f};
+		float position_ned[3]{0.f, 0.f, 0.f};
+		float velocity_ned[3]{0.f, 0.f, 0.f};
+		float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};
+		float angular_velocity_body[3]{0.f, 0.f, 0.f};
 
-float target_position_ned[3]{0.f, 0.f, 0.f};
-float target_velocity_ned[3]{0.f, 0.f, 0.f};
-float target_acceleration_ned[3]{0.f, 0.f, 0.f};
-float target_jerk_ned[3]{0.f, 0.f, 0.f};
-float target_snap_ned[3]{0.f, 0.f, 0.f};
+		float target_position_ned[3]{0.f, 0.f, 0.f};
+		float target_velocity_ned[3]{0.f, 0.f, 0.f};
+		float target_acceleration_ned[3]{0.f, 0.f, 0.f};
+		float target_jerk_ned[3]{0.f, 0.f, 0.f};
+		float target_snap_ned[3]{0.f, 0.f, 0.f};
 
-float target_yaw{0.f};
-float target_yaw_rate{0.f};
-float target_yaw_accel{0.f};
+		float target_yaw{0.f};
+		float target_yaw_rate{0.f};
+		float target_yaw_accel{0.f};
 
-bool state_valid_for_control{false};
-bool armed{false};
-bool failsafe{false};
-uint8_t nav_state{0};
-};
+		bool state_valid_for_control{false};
+		bool armed{false};
+		bool failsafe{false};
+		uint8_t nav_state{0};
+	};
 
-struct Output {
-hrt_abstime timestamp_us{0};
+	struct Output {
+		hrt_abstime timestamp_us{0};
 
-float position_error_ned[3]{0.f, 0.f, 0.f};
-float velocity_error_ned[3]{0.f, 0.f, 0.f};
-float desired_acceleration_ned[3]{0.f, 0.f, 0.f};
+		float position_error_ned[3]{0.f, 0.f, 0.f};
+		float velocity_error_ned[3]{0.f, 0.f, 0.f};
+		float desired_acceleration_ned[3]{0.f, 0.f, 0.f};
 
-// Euler angles are [roll, pitch, yaw] in radians.
-float current_euler_rpy[3]{0.f, 0.f, 0.f};
-float desired_euler_rpy[3]{0.f, 0.f, 0.f};
-float attitude_error_rpy[3]{0.f, 0.f, 0.f};
-float attitude_integral_rpy[3]{0.f, 0.f, 0.f};
-float rate_error_body[3]{0.f, 0.f, 0.f};
+		float current_euler_rpy[3]{0.f, 0.f, 0.f};
+		float desired_euler_rpy[3]{0.f, 0.f, 0.f};
+		float attitude_error_rpy[3]{0.f, 0.f, 0.f};
+		float attitude_integral_rpy[3]{0.f, 0.f, 0.f};
+		float rate_error_body[3]{0.f, 0.f, 0.f};
 
-float thrust_newton{0.f};
-float moment_newton_meter[3]{0.f, 0.f, 0.f};
+		float thrust_newton{0.f};
+		float moment_newton_meter[3]{0.f, 0.f, 0.f};
+		bool valid{false};
+	};
 
-bool valid{false};
-};
+	SimplePIDController();
+	~SimplePIDController() = default;
 
-SimplePIDController() = default;
-~SimplePIDController() = default;
+	bool update(const Input &input, Output &output);
+	void reset();
 
-bool update(const Input &input, Output &output);
-void reset();
-
-const Input &last_input() const { return _last_input; }
-const Output &last_output() const { return _last_output; }
+	const Input &last_input() const { return _last_input; }
+	const Output &last_output() const { return _last_output; }
 
 private:
-Input _last_input{};
-Output _last_output{};
-float _attitude_integral_rpy[3]{0.f, 0.f, 0.f};
-hrt_abstime _last_update_us{0};
-bool _was_active{false};
+	GeometricController _geometric_controller{};
+	Input _last_input{};
+	Output _last_output{};
 };
