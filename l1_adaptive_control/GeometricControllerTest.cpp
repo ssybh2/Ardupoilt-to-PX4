@@ -74,6 +74,27 @@ EXPECT_NEAR(norm3(output.rotation_error), 0.f, 1e-5f);
 EXPECT_NEAR(norm3(output.angular_velocity_error), 0.f, 1e-5f);
 }
 
+TEST(GeometricController, QuaternionUsesBodyToNedRotationConvention)
+{
+GeometricController controller;
+GeometricController::Input input = make_hover_input();
+
+const float roll = 0.5f;
+input.quat_body_to_ned[0] = cosf(roll * 0.5f);
+input.quat_body_to_ned[1] = sinf(roll * 0.5f);
+input.quat_body_to_ned[2] = 0.f;
+input.quat_body_to_ned[3] = 0.f;
+
+GeometricController::Output output{};
+EXPECT_TRUE(controller.update(input, output));
+ASSERT_TRUE(output.valid);
+
+EXPECT_NEAR(output.body_z_axis_ned[0], 0.f, 1e-5f);
+EXPECT_NEAR(output.body_z_axis_ned[1], -sinf(roll), 1e-5f);
+EXPECT_NEAR(output.body_z_axis_ned[2], cosf(roll), 1e-5f);
+EXPECT_NEAR(output.thrust_newton, kMassKg * kGravityMss * cosf(roll), 1e-3f);
+}
+
 TEST(GeometricController, DynamicCircleDoesNotForceOmegaDToZeroAndStaysFinite)
 {
 GeometricController controller;
