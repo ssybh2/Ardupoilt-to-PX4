@@ -17,3 +17,4 @@ px4_work_queue
 
 px4_add_unit_gtest(SRC TrajectoryGeneratorTest.cpp EXTRA_SRCS TrajectoryGenerator.cpp)
 px4_add_unit_gtest(SRC GeometricControllerTest.cpp EXTRA_SRCS GeometricController.cpp)
+px4_add_unit_gtest(SRC L1AdaptiveAugmentationTest.cpp EXTRA_SRCS L1AdaptiveAugmentation.cpp)
