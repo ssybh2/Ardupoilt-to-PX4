@@ -64,33 +64,7 @@ run_trajectory_generator();
 
 update_controller_input();
 run_geometric_controller();
-
-L1AdaptiveAugmentation::Input l1_input{};
-l1_input.timestamp_us = _state.timestamp_us;
-l1_input.baseline_valid = _geometric_output.valid;
-l1_input.state_valid = _state_valid_for_control;
-l1_input.armed = _state.armed;
-l1_input.failsafe = _state.failsafe;
-l1_input.baseline_thrust_moment[0] = _geometric_output.thrust_newton;
-
-for (int i = 0; i < 3; i++) {
-l1_input.velocity_ned[i] = _state.velocity_ned[i];
-l1_input.angular_velocity_body[i] = _state.angular_velocity_body[i];
-l1_input.baseline_thrust_moment[i + 1] = _geometric_output.moment_newton_meter[i];
-}
-
-for (int i = 0; i < 4; i++) {
-l1_input.quat_body_to_ned[i] = _state.quat_body_to_ned[i];
-}
-
-L1AdaptiveAugmentation::Output l1_output{};
-_l1_update_executed = _l1_adaptive_augmentation.update(l1_input, l1_output);
-
-for (int i = 0; i < 4; i++) {
-_l1_output_thrust_moment[i] = l1_output.adaptive_thrust_moment[i];
-_combined_thrust_moment[i] = l1_output.combined_thrust_moment[i];
-}
-
+run_l1_adaptive_augmentation();
 publish_control_setpoints();
 
 const hrt_abstime now_us = hrt_absolute_time();
@@ -271,6 +245,35 @@ _controller_input.nav_state = _state.nav_state;
 void L1AdaptiveControl::run_geometric_controller()
 {
 _geometric_update_executed = _geometric_controller.update(_controller_input, _geometric_output);
+}
+
+void L1AdaptiveControl::run_l1_adaptive_augmentation()
+{
+L1AdaptiveAugmentation::Input l1_input{};
+l1_input.timestamp_us = _state.timestamp_us;
+l1_input.baseline_valid = _geometric_output.valid;
+l1_input.state_valid = _state_valid_for_control;
+l1_input.armed = _state.armed;
+l1_input.failsafe = _state.failsafe;
+l1_input.baseline_thrust_moment[0] = _geometric_output.thrust_newton;
+
+for (int i = 0; i < 3; i++) {
+l1_input.velocity_ned[i] = _state.velocity_ned[i];
+l1_input.angular_velocity_body[i] = _state.angular_velocity_body[i];
+l1_input.baseline_thrust_moment[i + 1] = _geometric_output.moment_newton_meter[i];
+}
+
+for (int i = 0; i < 4; i++) {
+l1_input.quat_body_to_ned[i] = _state.quat_body_to_ned[i];
+}
+
+L1AdaptiveAugmentation::Output l1_output{};
+_l1_update_executed = _l1_adaptive_augmentation.update(l1_input, l1_output);
+
+for (int i = 0; i < 4; i++) {
+_l1_output_thrust_moment[i] = l1_output.adaptive_thrust_moment[i];
+_combined_thrust_moment[i] = l1_output.combined_thrust_moment[i];
+}
 }
 
 void L1AdaptiveControl::publish_control_setpoints()
