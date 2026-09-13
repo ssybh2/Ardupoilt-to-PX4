@@ -1,6 +1,7 @@
 #pragma once
 
 #include <drivers/drv_hrt.h>
+#include <matrix/matrix/math.hpp>
 
 class L1AdaptiveAugmentation
 {
@@ -31,18 +32,18 @@ private:
 		bool initialized{false};
 		hrt_abstime last_update_us{0};
 
-		float velocity_hat_prev[3]{0.f, 0.f, 0.f};
-		float angular_velocity_hat_prev[3]{0.f, 0.f, 0.f};
-		float velocity_prev[3]{0.f, 0.f, 0.f};
-		float angular_velocity_prev[3]{0.f, 0.f, 0.f};
-		float rotation_body_to_ned_prev[3][3]{{1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 0.f, 1.f}};
+		matrix::Vector3f velocity_hat_prev{};
+		matrix::Vector3f angular_velocity_hat_prev{};
+		matrix::Vector3f velocity_prev{};
+		matrix::Vector3f angular_velocity_prev{};
+		matrix::Matrix3f rotation_body_to_ned_prev{};
 
-		float baseline_thrust_moment_prev[4]{0.f, 0.f, 0.f, 0.f};
-		float adaptive_thrust_moment_prev[4]{0.f, 0.f, 0.f, 0.f};
-		float sigma_matched_prev[4]{0.f, 0.f, 0.f, 0.f};
-		float sigma_unmatched_prev[2]{0.f, 0.f};
-		float lpf1_prev[4]{0.f, 0.f, 0.f, 0.f};
-		float lpf2_prev[4]{0.f, 0.f, 0.f, 0.f};
+		matrix::Vector4f baseline_thrust_moment_prev{};
+		matrix::Vector4f adaptive_thrust_moment_prev{};
+		matrix::Vector4f sigma_matched_prev{};
+		matrix::Vector2f sigma_unmatched_prev{};
+		matrix::Vector4f lpf1_prev{};
+		matrix::Vector4f lpf2_prev{};
 	};
 
 	State _state{};
