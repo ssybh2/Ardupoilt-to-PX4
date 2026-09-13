@@ -79,7 +79,7 @@ bool L1AdaptiveAugmentation::update(const Input &input, Output &output)
 		baseline_thrust_moment(i) = input.baseline_thrust_moment[i];
 	}
 
-	const Matrix3f rotation{Dcmf{Quatf{input.quat_body_to_ned}}};
+	const Dcmf rotation{Quatf{input.quat_body_to_ned}};
 	const Vector3f body_x{rotation.col(0)};
 	const Vector3f body_y{rotation.col(1)};
 	const Vector3f body_z{rotation.col(2)};
