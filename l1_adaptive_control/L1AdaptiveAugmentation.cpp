@@ -2,6 +2,14 @@
 
 #include <math.h>
 #include <mathlib/mathlib.h>
+#include <matrix/matrix/math.hpp>
+
+using matrix::Dcmf;
+using matrix::Matrix3f;
+using matrix::Quatf;
+using matrix::Vector2f;
+using matrix::Vector3f;
+using matrix::Vector4f;
 
 namespace
 {
@@ -9,8 +17,13 @@ namespace
 static constexpr float VEHICLE_MASS_KG = 3.0f;
 static constexpr float GRAVITY_MSS = 9.80665f;
 
-static constexpr float INERTIA_KGM2[3] = {0.023f, 0.023f, 0.0459f};
-static constexpr float INERTIA_INVERSE[3] = {43.478f, 43.478f, 21.786f};
+static constexpr float JXX_KGM2 = 0.023f;
+static constexpr float JYY_KGM2 = 0.023f;
+static constexpr float JZZ_KGM2 = 0.0459f;
+
+static constexpr float JINV_XX = 43.478f;
+static constexpr float JINV_YY = 43.478f;
+static constexpr float JINV_ZZ = 21.786f;
 
 static constexpr bool L1_ENABLE = true;
 static constexpr float L1_AS_V = -5.0f;
@@ -29,46 +42,6 @@ static constexpr float ADAPTIVE_LIMITS[4] = {
 	MAX_L1_YAW_MOMENT_NM
 };
 
-void quat_to_rotation_matrix_body_to_ned(const float q[4], float rotation[3][3])
-{
-	const float w = q[0];
-	const float x = q[1];
-	const float y = q[2];
-	const float z = q[3];
-
-	rotation[0][0] = 1.0f - 2.0f * (y * y + z * z);
-	rotation[0][1] = 2.0f * (x * y - w * z);
-	rotation[0][2] = 2.0f * (x * z + w * y);
-
-	rotation[1][0] = 2.0f * (x * y + w * z);
-	rotation[1][1] = 1.0f - 2.0f * (x * x + z * z);
-	rotation[1][2] = 2.0f * (y * z - w * x);
-
-	rotation[2][0] = 2.0f * (x * z - w * y);
-	rotation[2][1] = 2.0f * (y * z + w * x);
-	rotation[2][2] = 1.0f - 2.0f * (x * x + y * y);
-}
-
-void cross3(const float a[3], const float b[3], float output[3])
-{
-	for (int i = 0; i < 3; i++) {
-		const int j = (i + 1) % 3;
-		const int k = (i + 2) % 3;
-		output[i] = a[j] * b[k] - a[k] * b[j];
-	}
-}
-
-float dot_matrix_column(const float matrix[3][3], int column, const float vector[3])
-{
-	float result = 0.f;
-
-	for (int i = 0; i < 3; i++) {
-		result += matrix[i][column] * vector[i];
-	}
-
-	return result;
-}
-
 float phi_inverse_mu(float prediction_error, float as_value, float dt)
 {
 	const float exp_as_dt = expf(as_value * dt);
@@ -81,7 +54,7 @@ float phi_inverse_mu(float prediction_error, float as_value, float dt)
 	return prediction_error / denominator * as_value * exp_as_dt;
 }
 
-}
+} // namespace
 
 void L1AdaptiveAugmentation::reset()
 {
@@ -97,155 +70,144 @@ bool L1AdaptiveAugmentation::update(const Input &input, Output &output)
 		return false;
 	}
 
-	float rotation[3][3]{};
-	quat_to_rotation_matrix_body_to_ned(input.quat_body_to_ned, rotation);
+	const Vector3f velocity_now{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
+	const Vector3f omega_now{input.angular_velocity_body[0], input.angular_velocity_body[1],
+				 input.angular_velocity_body[2]};
+	Vector4f baseline_thrust_moment{};
+
+	for (int i = 0; i < 4; i++) {
+		baseline_thrust_moment(i) = input.baseline_thrust_moment[i];
+	}
+
+	const Matrix3f rotation{Dcmf{Quatf{input.quat_body_to_ned}}};
+	const Vector3f body_x{rotation.col(0)};
+	const Vector3f body_y{rotation.col(1)};
+	const Vector3f body_z{rotation.col(2)};
+	const Vector3f e3{0.f, 0.f, 1.f};
+
+	Matrix3f inertia{};
+	inertia(0, 0) = JXX_KGM2;
+	inertia(1, 1) = JYY_KGM2;
+	inertia(2, 2) = JZZ_KGM2;
+
+	Matrix3f inertia_inverse{};
+	inertia_inverse(0, 0) = JINV_XX;
+	inertia_inverse(1, 1) = JINV_YY;
+	inertia_inverse(2, 2) = JINV_ZZ;
 
 	if (!_state.initialized) {
-		for (int i = 0; i < 3; i++) {
-			_state.velocity_hat_prev[i] = input.velocity_ned[i];
-			_state.velocity_prev[i] = input.velocity_ned[i];
-			_state.angular_velocity_hat_prev[i] = input.angular_velocity_body[i];
-			_state.angular_velocity_prev[i] = input.angular_velocity_body[i];
-		}
-
-		for (int row = 0; row < 3; row++) {
-			for (int col = 0; col < 3; col++) {
-				_state.rotation_body_to_ned_prev[row][col] = rotation[row][col];
-			}
-		}
-
-		for (int i = 0; i < 4; i++) {
-			_state.baseline_thrust_moment_prev[i] = input.baseline_thrust_moment[i];
-		}
-
+		_state.velocity_hat_prev = velocity_now;
+		_state.velocity_prev = velocity_now;
+		_state.angular_velocity_hat_prev = omega_now;
+		_state.angular_velocity_prev = omega_now;
+		_state.rotation_body_to_ned_prev = rotation;
+		_state.baseline_thrust_moment_prev = baseline_thrust_moment;
 		_state.last_update_us = input.timestamp_us;
 		_state.initialized = true;
 	}
 
 	const float dt = math::constrain((input.timestamp_us - _state.last_update_us) * 1e-6f, 0.001f, 0.02f);
 
-	float velocity_prediction_error_prev[3]{};
-	float angular_prediction_error_prev[3]{};
-
-	for (int i = 0; i < 3; i++) {
-		velocity_prediction_error_prev[i] = _state.velocity_hat_prev[i] - _state.velocity_prev[i];
-		angular_prediction_error_prev[i] = _state.angular_velocity_hat_prev[i] - _state.angular_velocity_prev[i];
-	}
+	const Vector3f velocity_prediction_error_prev = _state.velocity_hat_prev - _state.velocity_prev;
+	const Vector3f angular_prediction_error_prev =
+		_state.angular_velocity_hat_prev - _state.angular_velocity_prev;
 
 	const float previous_total_thrust =
-		_state.baseline_thrust_moment_prev[0]
-		+ _state.adaptive_thrust_moment_prev[0]
-		+ _state.sigma_matched_prev[0];
+		_state.baseline_thrust_moment_prev(0)
+		+ _state.adaptive_thrust_moment_prev(0)
+		+ _state.sigma_matched_prev(0);
 
-	float velocity_hat[3]{};
+	const Vector3f body_x_prev{_state.rotation_body_to_ned_prev.col(0)};
+	const Vector3f body_y_prev{_state.rotation_body_to_ned_prev.col(1)};
+	const Vector3f body_z_prev{_state.rotation_body_to_ned_prev.col(2)};
 
-	for (int i = 0; i < 3; i++) {
-		const float gravity_term = (i == 2) ? GRAVITY_MSS : 0.f;
+	const Vector3f velocity_hat =
+		_state.velocity_hat_prev
+		+ (e3 * GRAVITY_MSS
+		   - body_z_prev * (previous_total_thrust / VEHICLE_MASS_KG)
+		   + body_x_prev * (_state.sigma_unmatched_prev(0) / VEHICLE_MASS_KG)
+		   + body_y_prev * (_state.sigma_unmatched_prev(1) / VEHICLE_MASS_KG)
+		   + velocity_prediction_error_prev * L1_AS_V) * dt;
 
-		velocity_hat[i] = _state.velocity_hat_prev[i]
-				  + (gravity_term
-				     - _state.rotation_body_to_ned_prev[i][2] * previous_total_thrust / VEHICLE_MASS_KG
-				     + _state.rotation_body_to_ned_prev[i][0] * _state.sigma_unmatched_prev[0] / VEHICLE_MASS_KG
-				     + _state.rotation_body_to_ned_prev[i][1] * _state.sigma_unmatched_prev[1] / VEHICLE_MASS_KG
-				     + velocity_prediction_error_prev[i] * L1_AS_V) * dt;
-	}
+	const Vector3f previous_total_moment{
+		_state.baseline_thrust_moment_prev(1) + _state.adaptive_thrust_moment_prev(1) + _state.sigma_matched_prev(1),
+		_state.baseline_thrust_moment_prev(2) + _state.adaptive_thrust_moment_prev(2) + _state.sigma_matched_prev(2),
+		_state.baseline_thrust_moment_prev(3) + _state.adaptive_thrust_moment_prev(3) + _state.sigma_matched_prev(3)
+	};
 
-	float inertia_omega_prev[3]{};
+	const Vector3f gyro_moment_prev =
+		_state.angular_velocity_prev.cross(inertia * _state.angular_velocity_prev);
 
-	for (int i = 0; i < 3; i++) {
-		inertia_omega_prev[i] = INERTIA_KGM2[i] * _state.angular_velocity_prev[i];
-	}
+	const Vector3f angular_velocity_hat =
+		_state.angular_velocity_hat_prev
+		+ (-(inertia_inverse * gyro_moment_prev)
+		   + inertia_inverse * previous_total_moment
+		   + angular_prediction_error_prev * L1_AS_OMEGA) * dt;
 
-	float gyro_moment_prev[3]{};
-	cross3(_state.angular_velocity_prev, inertia_omega_prev, gyro_moment_prev);
+	const Vector3f velocity_prediction_error = velocity_hat - velocity_now;
+	const Vector3f angular_prediction_error = angular_velocity_hat - omega_now;
 
-	float previous_total_moment[3]{};
-
-	for (int i = 0; i < 3; i++) {
-		const int channel = i + 1;
-		previous_total_moment[i] = _state.baseline_thrust_moment_prev[channel]
-					   + _state.adaptive_thrust_moment_prev[channel]
-					   + _state.sigma_matched_prev[channel];
-	}
-
-	float angular_velocity_hat[3]{};
-
-	for (int i = 0; i < 3; i++) {
-		angular_velocity_hat[i] = _state.angular_velocity_hat_prev[i]
-					  + (-INERTIA_INVERSE[i] * gyro_moment_prev[i]
-					     + INERTIA_INVERSE[i] * previous_total_moment[i]
-					     + angular_prediction_error_prev[i] * L1_AS_OMEGA) * dt;
-	}
-
-	float phi_inv_mu_v[3]{};
-	float phi_inv_mu_omega[3]{};
+	Vector3f phi_inv_mu_v{};
+	Vector3f phi_inv_mu_omega{};
 
 	for (int i = 0; i < 3; i++) {
-		const float velocity_prediction_error = velocity_hat[i] - input.velocity_ned[i];
-		const float angular_prediction_error = angular_velocity_hat[i] - input.angular_velocity_body[i];
-		phi_inv_mu_v[i] = phi_inverse_mu(velocity_prediction_error, L1_AS_V, dt);
-		phi_inv_mu_omega[i] = phi_inverse_mu(angular_prediction_error, L1_AS_OMEGA, dt);
+		phi_inv_mu_v(i) = phi_inverse_mu(velocity_prediction_error(i), L1_AS_V, dt);
+		phi_inv_mu_omega(i) = phi_inverse_mu(angular_prediction_error(i), L1_AS_OMEGA, dt);
 	}
 
-	float sigma_matched[4]{};
-	float sigma_unmatched[2]{};
+	Vector4f sigma_matched{};
+	Vector2f sigma_unmatched{};
 
-	sigma_matched[0] = dot_matrix_column(rotation, 2, phi_inv_mu_v) * VEHICLE_MASS_KG;
+	sigma_matched(0) = body_z.dot(phi_inv_mu_v) * VEHICLE_MASS_KG;
+	const Vector3f sigma_matched_moment = -(inertia * phi_inv_mu_omega);
 
 	for (int i = 0; i < 3; i++) {
-		sigma_matched[i + 1] = -INERTIA_KGM2[i] * phi_inv_mu_omega[i];
+		sigma_matched(i + 1) = sigma_matched_moment(i);
 	}
 
-	for (int i = 0; i < 2; i++) {
-		sigma_unmatched[i] = -dot_matrix_column(rotation, i, phi_inv_mu_v) * VEHICLE_MASS_KG;
-	}
+	sigma_unmatched(0) = -body_x.dot(phi_inv_mu_v) * VEHICLE_MASS_KG;
+	sigma_unmatched(1) = -body_y.dot(phi_inv_mu_v) * VEHICLE_MASS_KG;
 
 	const float lpf2_moment_keep = expf(-L1_CUTOFF_Q2_MOMENT * dt);
-	float lpf1[4]{};
-	float lpf2[4]{};
+	Vector4f lpf1{};
+	Vector4f lpf2{};
 
 	for (int i = 0; i < 4; i++) {
 		const float cutoff_q1 = (i == 0) ? L1_CUTOFF_Q1_THRUST : L1_CUTOFF_Q1_MOMENT;
 		const float lpf1_keep = expf(-cutoff_q1 * dt);
-		lpf1[i] = lpf1_keep * _state.lpf1_prev[i] + (1.f - lpf1_keep) * sigma_matched[i];
+		lpf1(i) = lpf1_keep * _state.lpf1_prev(i) + (1.f - lpf1_keep) * sigma_matched(i);
 
 		if (i == 0) {
-			lpf2[i] = lpf1[i];
+			lpf2(i) = lpf1(i);
 
 		} else {
-			lpf2[i] = lpf2_moment_keep * _state.lpf2_prev[i] + (1.f - lpf2_moment_keep) * lpf1[i];
+			lpf2(i) = lpf2_moment_keep * _state.lpf2_prev(i) + (1.f - lpf2_moment_keep) * lpf1(i);
 		}
 
-		output.adaptive_thrust_moment[i] = L1_ENABLE
-			? math::constrain(-lpf2[i], -ADAPTIVE_LIMITS[i], ADAPTIVE_LIMITS[i])
-			: 0.f;
-		output.combined_thrust_moment[i] = input.baseline_thrust_moment[i] + output.adaptive_thrust_moment[i];
+		const float adaptive_command = L1_ENABLE
+					       ? math::constrain(-lpf2(i), -ADAPTIVE_LIMITS[i], ADAPTIVE_LIMITS[i])
+					       : 0.f;
+		output.adaptive_thrust_moment[i] = adaptive_command;
+		output.combined_thrust_moment[i] = baseline_thrust_moment(i) + adaptive_command;
 	}
 
 	for (int i = 0; i < 2; i++) {
-		sigma_unmatched[i] = math::constrain(sigma_unmatched[i], -MAX_L1_THRUST_N, MAX_L1_THRUST_N);
-		_state.sigma_unmatched_prev[i] = sigma_unmatched[i];
+		_state.sigma_unmatched_prev(i) =
+			math::constrain(sigma_unmatched(i), -MAX_L1_THRUST_N, MAX_L1_THRUST_N);
 	}
 
-	for (int i = 0; i < 3; i++) {
-		_state.velocity_hat_prev[i] = velocity_hat[i];
-		_state.velocity_prev[i] = input.velocity_ned[i];
-		_state.angular_velocity_hat_prev[i] = angular_velocity_hat[i];
-		_state.angular_velocity_prev[i] = input.angular_velocity_body[i];
-	}
+	_state.velocity_hat_prev = velocity_hat;
+	_state.velocity_prev = velocity_now;
+	_state.angular_velocity_hat_prev = angular_velocity_hat;
+	_state.angular_velocity_prev = omega_now;
+	_state.rotation_body_to_ned_prev = rotation;
+	_state.baseline_thrust_moment_prev = baseline_thrust_moment;
+	_state.sigma_matched_prev = sigma_matched;
+	_state.lpf1_prev = lpf1;
+	_state.lpf2_prev = lpf2;
 
 	for (int i = 0; i < 4; i++) {
-		_state.baseline_thrust_moment_prev[i] = input.baseline_thrust_moment[i];
-		_state.adaptive_thrust_moment_prev[i] = output.adaptive_thrust_moment[i];
-		_state.sigma_matched_prev[i] = sigma_matched[i];
-		_state.lpf1_prev[i] = lpf1[i];
-		_state.lpf2_prev[i] = lpf2[i];
-	}
-
-	for (int row = 0; row < 3; row++) {
-		for (int col = 0; col < 3; col++) {
-			_state.rotation_body_to_ned_prev[row][col] = rotation[row][col];
-		}
+		_state.adaptive_thrust_moment_prev(i) = output.adaptive_thrust_moment[i];
 	}
 
 	_state.last_update_us = input.timestamp_us;
