@@ -5,6 +5,8 @@ COMPILE_FLAGS
 SRCS
 L1AdaptiveControl.cpp
 L1AdaptiveControl.hpp
+L1AdaptiveAugmentation.cpp
+L1AdaptiveAugmentation.hpp
 GeometricController.cpp
 GeometricController.hpp
 TrajectoryGenerator.cpp
