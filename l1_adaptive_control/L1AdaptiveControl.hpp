@@ -83,6 +83,7 @@ void apply_trajectory_command();
 
 void update_controller_input();
 void run_geometric_controller();
+void run_l1_adaptive_augmentation();
 
 void publish_control_setpoints();
 
