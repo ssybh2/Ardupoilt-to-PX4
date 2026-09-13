@@ -36,7 +36,7 @@ private:
 		matrix::Vector3f angular_velocity_hat_prev{};
 		matrix::Vector3f velocity_prev{};
 		matrix::Vector3f angular_velocity_prev{};
-		matrix::Matrix3f rotation_body_to_ned_prev{};
+		matrix::Dcmf rotation_body_to_ned_prev{};
 
 		matrix::Vector4f baseline_thrust_moment_prev{};
 		matrix::Vector4f adaptive_thrust_moment_prev{};
