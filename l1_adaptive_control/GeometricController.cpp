@@ -49,23 +49,6 @@ bool is_normalizable(const Vector3f &v)
 	return norm >= 1e-6f && isfinite(norm);
 }
 
-Matrix3f hat_operator(const Vector3f &input)
-{
-	Matrix3f output{};
-	output(0, 1) = -input(2);
-	output(0, 2) = input(1);
-	output(1, 0) = input(2);
-	output(1, 2) = -input(0);
-	output(2, 0) = -input(1);
-	output(2, 1) = input(0);
-	return output;
-}
-
-Vector3f vee_operator(const Matrix3f &input)
-{
-	return Vector3f{input(2, 1), input(0, 2), input(1, 0)};
-}
-
 bool unit_vec_with_derivatives(const Vector3f &q,
 			       const Vector3f &q_dot,
 			       const Vector3f &q_ddot,
@@ -126,7 +109,6 @@ bool is_finite_matrix3(const float matrix[3][3])
 				return false;
 			}
 		}
-	}
 
 	return true;
 }
@@ -212,7 +194,7 @@ bool GeometricController::update(const Input &input, Output &output)
 			  - KP_Z * position_error(2) - KV_Z * velocity_error(2);
 
 	const Quatf attitude{input.quat_body_to_ned};
-	const Matrix3f rotation{Dcmf{attitude}};
+	const Dcmf rotation{attitude};
 	const Vector3f body_z_axis{rotation(0, 2), rotation(1, 2), rotation(2, 2)};
 
 	if (!is_finite(body_z_axis)) {
@@ -234,7 +216,7 @@ bool GeometricController::update(const Input &input, Output &output)
 	target_force_dot(2) = -KP_Z * velocity_error(2) - KV_Z * acceleration_error(2)
 			      + VEHICLE_MASS_KG * target_jerk(2);
 
-	const Vector3f body_z_axis_dot = rotation * hat_operator(omega) * e3;
+	const Vector3f body_z_axis_dot = rotation * omega.hat() * e3;
 	const float thrust_dot_newton_s = -target_force_dot.dot(body_z_axis) - target_force.dot(body_z_axis_dot);
 
 	const Vector3f jerk_error =
@@ -323,13 +305,13 @@ bool GeometricController::update(const Input &input, Output &output)
 
 	const Matrix3f rotation_error_matrix =
 		(desired_rotation.transpose() * rotation - rotation.transpose() * desired_rotation) * 0.5f;
-	const Vector3f rotation_error = vee_operator(rotation_error_matrix);
+	const Vector3f rotation_error = Dcmf{rotation_error_matrix}.vee();
 
-	const Vector3f desired_angular_velocity = vee_operator(desired_rotation.transpose() * desired_rotation_dot);
-	const Matrix3f desired_angular_velocity_hat = hat_operator(desired_angular_velocity);
+	const Vector3f desired_angular_velocity = Dcmf{desired_rotation.transpose() * desired_rotation_dot}.vee();
+	const Dcmf desired_angular_velocity_hat = desired_angular_velocity.hat();
 	const Vector3f desired_angular_acceleration =
-		vee_operator(desired_rotation.transpose() * desired_rotation_ddot
-			     - desired_angular_velocity_hat * desired_angular_velocity_hat);
+		Dcmf{desired_rotation.transpose() * desired_rotation_ddot
+		     - desired_angular_velocity_hat * desired_angular_velocity_hat}.vee();
 
 	const Matrix3f rotation_transpose_desired = rotation.transpose() * desired_rotation;
 	const Vector3f desired_angular_velocity_in_body = rotation_transpose_desired * desired_angular_velocity;
@@ -348,7 +330,7 @@ bool GeometricController::update(const Input &input, Output &output)
 	inertia(2, 2) = JZZ_KGM2;
 
 	const Vector3f feedforward_argument =
-		hat_operator(omega) * desired_angular_velocity_in_body - desired_angular_acceleration_in_body;
+		omega.hat() * desired_angular_velocity_in_body - desired_angular_acceleration_in_body;
 	const Vector3f feedforward_moment = -(inertia * feedforward_argument);
 	const Vector3f j_omega = inertia * omega;
 	const Vector3f gyro_moment = omega.cross(j_omega);
