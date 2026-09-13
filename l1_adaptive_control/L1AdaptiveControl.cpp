@@ -1,7 +1,7 @@
 #include "L1AdaptiveControl.hpp"
 
-#include <math.h>
 #include <mathlib/mathlib.h>
+#include <matrix/matrix/math.hpp>
 #include <string.h>
 
 namespace
@@ -16,11 +16,7 @@ static constexpr hrt_abstime MANUAL_CONTROL_TIMEOUT_US = 500000;
 
 float yaw_from_quat_body_to_ned(const float q[4])
 {
-	const float w = q[0];
-	const float x = q[1];
-	const float y = q[2];
-	const float z = q[3];
-	return atan2f(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z));
+	return matrix::Eulerf(matrix::Quatf(q)).psi();
 }
 
 }
