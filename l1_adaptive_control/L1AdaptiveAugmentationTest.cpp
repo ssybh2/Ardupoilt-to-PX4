@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <math.h>
+
 namespace
 {
 
@@ -63,6 +65,30 @@ TEST(L1AdaptiveAugmentation, FirstUpdateMatchesOriginalModeAdaptiveInitializatio
 	EXPECT_NEAR(output.adaptive_thrust_moment[3], 0.f, 1e-6f);
 }
 
+TEST(L1AdaptiveAugmentation, SourceInitUsesIdentityRprevNotMeasuredAttitude)
+{
+	L1AdaptiveAugmentation augmentation;
+	augmentation.set_parameters(sitl_parameters());
+
+	L1AdaptiveAugmentation::Input input = make_hover_input(1'000'000);
+	const float roll = 0.7f;
+	input.quat_body_to_ned[0] = cosf(roll * 0.5f);
+	input.quat_body_to_ned[1] = sinf(roll * 0.5f);
+	input.quat_body_to_ned[2] = 0.f;
+	input.quat_body_to_ned[3] = 0.f;
+
+	L1AdaptiveAugmentation::Output output{};
+	ASSERT_TRUE(augmentation.update(input, output));
+	ASSERT_TRUE(output.valid);
+
+	// Upstream init() constructs a default Quaternion before R_prev, so the
+	// first predictor step still uses identity R_prev even though the measured
+	// current attitude supplied to the uncertainty estimate is tilted.
+	EXPECT_NEAR(output.velocity_hat[0], 0.f, 1e-6f);
+	EXPECT_NEAR(output.velocity_hat[1], 0.f, 1e-6f);
+	EXPECT_NEAR(output.velocity_hat[2], kGravityMss * 0.0025f, 1e-6f);
+}
+
 TEST(L1AdaptiveAugmentation, SourceAlgorithmUsesFixedDtAndDoesNotApplyCustomAdaptiveLimit)
 {
 	L1AdaptiveAugmentation augmentation;
@@ -82,7 +108,7 @@ TEST(L1AdaptiveAugmentation, SourceAlgorithmUsesFixedDtAndDoesNotApplyCustomAdap
 	EXPECT_NEAR(output.adaptive_thrust_moment[0], 58.1694f, 2e-3f);
 }
 
-TEST(L1AdaptiveAugmentation, InvalidInputResetsSourceState)
+TEST(L1AdaptiveAugmentation, ReentryKeepsSourceSigmaButResetsUbUadAndFilters)
 {
 	L1AdaptiveAugmentation augmentation;
 	augmentation.set_parameters(sitl_parameters());
@@ -95,7 +121,12 @@ TEST(L1AdaptiveAugmentation, InvalidInputResetsSourceState)
 	EXPECT_FALSE(augmentation.update(invalid, output));
 	EXPECT_FALSE(output.valid);
 
-	// Re-entering the module replays the original ModeAdaptive::init() state.
 	ASSERT_TRUE(augmentation.update(make_hover_input(5'000'000), output));
-	EXPECT_NEAR(output.adaptive_thrust_moment[0], -0.7218507f, 2e-4f);
+	ASSERT_TRUE(output.valid);
+
+	// ModeAdaptive::init() zeros u_b_prev, u_ad_prev, LPF1 and LPF2, but it does
+	// not clear sigma_m_hat_prev/sigma_um_hat_prev.  Preserve that exact re-entry
+	// behavior instead of inventing a full estimator reset.
+	EXPECT_NEAR(output.velocity_hat[2], 0.00015291f, 2e-6f);
+	EXPECT_NEAR(output.adaptive_thrust_moment[0], -0.00450217f, 2e-5f);
 }
