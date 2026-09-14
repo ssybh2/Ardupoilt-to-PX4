@@ -116,12 +116,15 @@ bool L1AdaptiveAugmentation::update(const Input &input, Output &output)
 
 	const Vector3f vpred_error_prev = _v_hat_prev - _v_prev;
 	const Vector3f omegapred_error_prev = _omega_hat_prev - _omega_prev;
+	const Vector3f R_prev_colx{_R_prev.col(0)};
+	const Vector3f R_prev_coly{_R_prev.col(1)};
+	const Vector3f R_prev_colz{_R_prev.col(2)};
 
 	v_hat = _v_hat_prev
 		+ (e3 * GRAVITY_MAGNITUDE
-		   - _R_prev.col(2) * (_u_b_prev(0) + _u_ad_prev(0) + _sigma_m_hat_prev(0)) * massInverse
-		   + _R_prev.col(0) * _sigma_um_hat_prev(0) * massInverse
-		   + _R_prev.col(1) * _sigma_um_hat_prev(1) * massInverse
+		   - R_prev_colz * (_u_b_prev(0) + _u_ad_prev(0) + _sigma_m_hat_prev(0)) * massInverse
+		   + R_prev_colx * _sigma_um_hat_prev(0) * massInverse
+		   + R_prev_coly * _sigma_um_hat_prev(1) * massInverse
 		   + vpred_error_prev * As_v) * dt;
 
 	const Vector3f tempVec{
@@ -151,15 +154,18 @@ bool L1AdaptiveAugmentation::update(const Input &input, Output &output)
 	Vector4f sigma_m_hat{};
 	Vector2f sigma_um_hat{};
 	const Dcmf R{Quatf{input.quat_body_to_ned}};
+	const Vector3f R_colx{R.col(0)};
+	const Vector3f R_coly{R.col(1)};
+	const Vector3f R_colz{R.col(2)};
 
-	sigma_m_hat(0) = R.col(2).dot(PhiInvmu_v) * kg_vehicleMass;
+	sigma_m_hat(0) = R_colz.dot(PhiInvmu_v) * kg_vehicleMass;
 	const Vector3f sigma_m_hat_2to4 = -(J * PhiInvmu_omega);
 	sigma_m_hat(1) = sigma_m_hat_2to4(0);
 	sigma_m_hat(2) = sigma_m_hat_2to4(1);
 	sigma_m_hat(3) = sigma_m_hat_2to4(2);
 
-	sigma_um_hat(0) = -R.col(0).dot(PhiInvmu_v) * kg_vehicleMass;
-	sigma_um_hat(1) = -R.col(1).dot(PhiInvmu_v) * kg_vehicleMass;
+	sigma_um_hat(0) = -R_colx.dot(PhiInvmu_v) * kg_vehicleMass;
+	sigma_um_hat(1) = -R_coly.dot(PhiInvmu_v) * kg_vehicleMass;
 
 	_sigma_m_hat_prev = sigma_m_hat;
 	_sigma_um_hat_prev = sigma_um_hat;
