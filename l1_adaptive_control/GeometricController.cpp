@@ -8,6 +8,7 @@ using matrix::Dcmf;
 using matrix::Matrix3f;
 using matrix::Quatf;
 using matrix::Vector;
+using matrix::Vector2f;
 using matrix::Vector3f;
 
 using Vector9f = Vector<float, 9>;
@@ -15,61 +16,50 @@ using Vector9f = Vector<float, 9>;
 namespace
 {
 
-static constexpr float VEHICLE_MASS_KG = 3.0f;
-static constexpr float GRAVITY_MSS = 9.80665f;
-
-static constexpr float KP_X = 18.0f;
-static constexpr float KP_Y = 18.0f;
-static constexpr float KP_Z = 27.6f;
-
-static constexpr float KV_X = 4.0f;
-static constexpr float KV_Y = 4.0f;
-static constexpr float KV_Z = 6.0f;
-
-static constexpr float KR_X = 5.4f;
-static constexpr float KR_Y = 5.4f;
-static constexpr float KR_Z = 0.092f;
-
-static constexpr float KO_X = 0.6f;
-static constexpr float KO_Y = 0.6f;
-static constexpr float KO_Z = 0.023f;
-
-static constexpr float JXX_KGM2 = 0.023f;
-static constexpr float JYY_KGM2 = 0.023f;
-static constexpr float JZZ_KGM2 = 0.0459f;
+static constexpr float GRAVITY_MAGNITUDE = 9.80665f;
 
 bool is_finite(const Vector3f &v)
 {
 	return isfinite(v(0)) && isfinite(v(1)) && isfinite(v(2));
 }
 
-bool is_normalizable(const Vector3f &v)
+Matrix3f hatOperator(const Vector3f &input)
 {
-	const float norm = v.norm();
-	return norm >= 1e-6f && isfinite(norm);
+	// Direct port of ModeAdaptive::hatOperator().
+	Matrix3f output{};
+	output(0, 0) = 0.f;
+	output(0, 1) = -input(2);
+	output(0, 2) = input(1);
+	output(1, 0) = input(2);
+	output(1, 1) = 0.f;
+	output(1, 2) = -input(0);
+	output(2, 0) = -input(1);
+	output(2, 1) = input(0);
+	output(2, 2) = 0.f;
+	return output;
 }
 
-bool unit_vec_with_derivatives(const Vector3f &q,
-			       const Vector3f &q_dot,
-			       const Vector3f &q_ddot,
-			       Vector9f &output)
+Vector3f veeOperator(const Matrix3f &input)
 {
+	// Direct port of ModeAdaptive::veeOperator().
+	return Vector3f{input(2, 1), input(0, 2), input(1, 0)};
+}
+
+bool unit_vec(const Vector3f &q, const Vector3f &q_dot, const Vector3f &q_ddot, Vector9f &output)
+{
+	// Same mathematics and ordering as ModeAdaptive::unit_vec().
 	const float nq = q.norm();
 
 	if (nq < 1e-6f || !isfinite(nq)) {
 		return false;
 	}
 
-	const float nq3 = nq * nq * nq;
-	const float nq5 = nq3 * nq * nq;
-	const float q_qdot = q.dot(q_dot);
-
 	const Vector3f u = q / nq;
-	const Vector3f u_dot = q_dot / nq - q * q_qdot / nq3;
+	const Vector3f u_dot = q_dot / nq - q * q.dot(q_dot) / powf(nq, 3.f);
 	const Vector3f u_ddot = q_ddot / nq
-				- q_dot * (2.f * q_qdot / nq3)
-				- q * ((q_dot.dot(q_dot) + q.dot(q_ddot)) / nq3)
-				+ q * (3.f * q_qdot * q_qdot / nq5);
+				- q_dot / powf(nq, 3.f) * 2.f * q.dot(q_dot)
+				- q / powf(nq, 3.f) * (q_dot.dot(q_dot) + q.dot(q_ddot))
+				+ q * 3.f / powf(nq, 5.f) * powf(q.dot(q_dot), 2.f);
 
 	for (int i = 0; i < 3; i++) {
 		output(i) = u(i);
@@ -87,75 +77,12 @@ void copy_vector(const Vector3f &input, float output[3])
 	}
 }
 
-void copy_matrix(const Matrix3f &input, float output[3][3])
-{
-	for (int row = 0; row < 3; row++) {
-		for (int col = 0; col < 3; col++) {
-			output[row][col] = input(row, col);
-		}
-	}
-}
-
-bool is_finite3(const float v[3])
-{
-	return isfinite(v[0]) && isfinite(v[1]) && isfinite(v[2]);
-}
-
-bool is_finite_matrix3(const float matrix[3][3])
-{
-	for (int row = 0; row < 3; row++) {
-		for (int col = 0; col < 3; col++) {
-			if (!isfinite(matrix[row][col])) {
-				return false;
-			}
-		}
-
-	return true;
-}
-
 bool output_is_finite(const GeometricController::Output &output)
 {
-	return isfinite(output.thrust_newton)
-	       && isfinite(output.target_thrust_dot_newton_s)
-	       && is_finite3(output.position_error_ned)
-	       && is_finite3(output.velocity_error_ned)
-	       && is_finite3(output.acceleration_error_ned)
-	       && is_finite3(output.jerk_error_ned)
-	       && is_finite3(output.target_force_ned)
-	       && is_finite3(output.target_force_dot_ned)
-	       && is_finite3(output.target_force_ddot_ned)
-	       && is_finite3(output.body_z_axis_ned)
-	       && is_finite3(output.body_z_axis_dot_ned)
-	       && is_finite3(output.desired_body_x_axis_ned)
-	       && is_finite3(output.desired_body_y_axis_ned)
-	       && is_finite3(output.desired_body_z_axis_ned)
-	       && is_finite3(output.desired_body_x_axis_dot_ned)
-	       && is_finite3(output.desired_body_y_axis_dot_ned)
-	       && is_finite3(output.desired_body_z_axis_dot_ned)
-	       && is_finite3(output.desired_body_x_axis_ddot_ned)
-	       && is_finite3(output.desired_body_y_axis_ddot_ned)
-	       && is_finite3(output.desired_body_z_axis_ddot_ned)
-	       && is_finite_matrix3(output.desired_rotation_matrix)
-	       && is_finite_matrix3(output.desired_rotation_matrix_dot)
-	       && is_finite_matrix3(output.desired_rotation_matrix_ddot)
-	       && is_finite3(output.b3c_ned)
-	       && is_finite3(output.b3c_dot_ned)
-	       && is_finite3(output.b3c_ddot_ned)
-	       && is_finite3(output.a2_ned)
-	       && is_finite3(output.a2_dot_ned)
-	       && is_finite3(output.a2_ddot_ned)
-	       && is_finite3(output.b2c_ned)
-	       && is_finite3(output.b2c_dot_ned)
-	       && is_finite3(output.b2c_ddot_ned)
-	       && is_finite3(output.rotation_error)
-	       && is_finite3(output.desired_angular_velocity_body)
-	       && is_finite3(output.desired_angular_acceleration_body)
-	       && is_finite3(output.angular_velocity_error)
-	       && is_finite3(output.pd_moment_newton_meter)
-	       && is_finite3(output.feedforward_moment_newton_meter)
-	       && is_finite3(output.j_omega_body)
-	       && is_finite3(output.gyro_moment_newton_meter)
-	       && is_finite3(output.moment_newton_meter);
+	return isfinite(output.target_thrust)
+	       && isfinite(output.r_error[0]) && isfinite(output.r_error[1]) && isfinite(output.r_error[2])
+	       && isfinite(output.v_error[0]) && isfinite(output.v_error[1]) && isfinite(output.v_error[2])
+	       && isfinite(output.M[0]) && isfinite(output.M[1]) && isfinite(output.M[2]);
 }
 
 } // namespace
@@ -166,230 +93,187 @@ bool GeometricController::update(const Input &input, Output &output)
 	output = Output{};
 	output.timestamp_us = input.timestamp_us;
 
+	// PX4 safety/interface gate.  The numerical controller below is the DSun /
+	// ModeAdaptive source controller.
 	if (!input.state_valid_for_control || !input.armed || input.failsafe) {
 		output.valid = false;
 		_last_output = output;
 		return true;
 	}
 
-	const Vector3f state_position{input.position_ned[0], input.position_ned[1], input.position_ned[2]};
-	const Vector3f state_velocity{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
-	const Vector3f omega{input.angular_velocity_body[0], input.angular_velocity_body[1], input.angular_velocity_body[2]};
+	const float kg_vehicleMass = _parameters.mass_kg;
+	const float GeoCtrl_Kpx = _parameters.position_gain[0];
+	const float GeoCtrl_Kpy = _parameters.position_gain[1];
+	const float GeoCtrl_Kpz = _parameters.position_gain[2];
+	const float GeoCtrl_Kvx = _parameters.velocity_gain[0];
+	const float GeoCtrl_Kvy = _parameters.velocity_gain[1];
+	const float GeoCtrl_Kvz = _parameters.velocity_gain[2];
+	const float GeoCtrl_KRx = _parameters.rotation_gain[0];
+	const float GeoCtrl_KRy = _parameters.rotation_gain[1];
+	const float GeoCtrl_KRz = _parameters.rotation_gain[2];
+	const float GeoCtrl_KOx = _parameters.angular_velocity_gain[0];
+	const float GeoCtrl_KOy = _parameters.angular_velocity_gain[1];
+	const float GeoCtrl_KOz = _parameters.angular_velocity_gain[2];
 
-	const Vector3f target_position{input.target_position_ned[0], input.target_position_ned[1], input.target_position_ned[2]};
-	const Vector3f target_velocity{input.target_velocity_ned[0], input.target_velocity_ned[1], input.target_velocity_ned[2]};
-	const Vector3f target_acceleration{input.target_acceleration_ned[0], input.target_acceleration_ned[1],
-					  input.target_acceleration_ned[2]};
-	const Vector3f target_jerk{input.target_jerk_ned[0], input.target_jerk_ned[1], input.target_jerk_ned[2]};
-	const Vector3f target_snap{input.target_snap_ned[0], input.target_snap_ned[1], input.target_snap_ned[2]};
+	Matrix3f J{};
+	J(0, 0) = _parameters.inertia_kg_m2[0];
+	J(1, 1) = _parameters.inertia_kg_m2[1];
+	J(2, 2) = _parameters.inertia_kg_m2[2];
+
+	const Vector3f targetPos{input.target_position_ned[0], input.target_position_ned[1], input.target_position_ned[2]};
+	const Vector3f targetVel{input.target_velocity_ned[0], input.target_velocity_ned[1], input.target_velocity_ned[2]};
+	const Vector3f targetAcc{input.target_acceleration_ned[0], input.target_acceleration_ned[1],
+				 input.target_acceleration_ned[2]};
+	const Vector3f targetJerk{input.target_jerk_ned[0], input.target_jerk_ned[1], input.target_jerk_ned[2]};
+	const Vector3f targetSnap{input.target_snap_ned[0], input.target_snap_ned[1], input.target_snap_ned[2]};
+	const Vector2f targetYaw{input.target_yaw[0], input.target_yaw[1]};
+	const Vector2f targetYaw_dot{input.target_yaw_dot[0], input.target_yaw_dot[1]};
+	const Vector2f targetYaw_ddot{input.target_yaw_ddot[0], input.target_yaw_ddot[1]};
+
+	const Vector3f statePos{input.position_ned[0], input.position_ned[1], input.position_ned[2]};
+	const Vector3f stateVel{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
+	const Vector3f Omega{input.angular_velocity_body[0], input.angular_velocity_body[1], input.angular_velocity_body[2]};
 	const Vector3f e3{0.f, 0.f, 1.f};
 
-	const Vector3f position_error = state_position - target_position;
-	const Vector3f velocity_error = state_velocity - target_velocity;
+	// Position Error (ep)
+	const Vector3f r_error = statePos - targetPos;
 
+	// Velocity Error (ev)
+	const Vector3f v_error = stateVel - targetVel;
+
+	// Target force
 	Vector3f target_force;
-	target_force(0) = VEHICLE_MASS_KG * target_acceleration(0) - KP_X * position_error(0) - KV_X * velocity_error(0);
-	target_force(1) = VEHICLE_MASS_KG * target_acceleration(1) - KP_Y * position_error(1) - KV_Y * velocity_error(1);
-	target_force(2) = VEHICLE_MASS_KG * (target_acceleration(2) - GRAVITY_MSS)
-			  - KP_Z * position_error(2) - KV_Z * velocity_error(2);
+	target_force(0) = kg_vehicleMass * targetAcc(0) - GeoCtrl_Kpx * r_error(0) - GeoCtrl_Kvx * v_error(0);
+	target_force(1) = kg_vehicleMass * targetAcc(1) - GeoCtrl_Kpy * r_error(1) - GeoCtrl_Kvy * v_error(1);
+	target_force(2) = kg_vehicleMass * (targetAcc(2) - GRAVITY_MAGNITUDE) - GeoCtrl_Kpz * r_error(2)
+			  - GeoCtrl_Kvz * v_error(2);
 
-	const Quatf attitude{input.quat_body_to_ned};
-	const Dcmf rotation{attitude};
-	const Vector3f body_z_axis{rotation(0, 2), rotation(1, 2), rotation(2, 2)};
+	// Z-Axis [zB]
+	const Quatf q{input.quat_body_to_ned};
+	const Matrix3f R{Dcmf{q}};
+	const Vector3f z_axis{R(0, 2), R(1, 2), R(2, 2)};
 
-	if (!is_finite(body_z_axis)) {
-		output.valid = false;
-		_last_output = output;
-		return true;
-	}
+	// Target thrust [F]
+	const float target_thrust = -target_force.dot(z_axis);
 
-	const float thrust_newton = -target_force.dot(body_z_axis);
+	// Calculate axis [zB_des]
+	Vector3f z_axis_desired = -target_force;
+	z_axis_desired.normalize();
 
-	const Vector3f acceleration_error =
-		e3 * GRAVITY_MSS - body_z_axis * (thrust_newton / VEHICLE_MASS_KG) - target_acceleration;
+	// [xC_des]
+	Vector3f x_c_des;
+	x_c_des(0) = targetYaw(0);
+	x_c_des(1) = targetYaw(1);
+	x_c_des(2) = 0.f;
+
+	const Vector3f x_c_des_dot{targetYaw_dot(0), targetYaw_dot(1), 0.f};
+	const Vector3f x_c_des_ddot{targetYaw_ddot(0), targetYaw_ddot(1), 0.f};
+
+	// [yB_des]
+	Vector3f y_axis_desired = z_axis_desired.cross(x_c_des);
+	y_axis_desired.normalize();
+
+	// [xB_des]
+	const Vector3f x_axis_desired = y_axis_desired.cross(z_axis_desired);
+
+	// [eR]
+	Matrix3f Rdes{};
+	Rdes.setCol(0, x_axis_desired);
+	Rdes.setCol(1, y_axis_desired);
+	Rdes.setCol(2, z_axis_desired);
+
+	const Matrix3f eRM = (Rdes.transpose() * R - R.transpose() * Rdes) * 0.5f;
+	const Vector3f eR = veeOperator(eRM);
+
+	// compute Omegad: same Appendix-F sequence as the source controller
+	const Vector3f a_error = e3 * GRAVITY_MAGNITUDE - z_axis * target_thrust / kg_vehicleMass - targetAcc;
 
 	Vector3f target_force_dot;
-	target_force_dot(0) = -KP_X * velocity_error(0) - KV_X * acceleration_error(0)
-			      + VEHICLE_MASS_KG * target_jerk(0);
-	target_force_dot(1) = -KP_Y * velocity_error(1) - KV_Y * acceleration_error(1)
-			      + VEHICLE_MASS_KG * target_jerk(1);
-	target_force_dot(2) = -KP_Z * velocity_error(2) - KV_Z * acceleration_error(2)
-			      + VEHICLE_MASS_KG * target_jerk(2);
+	target_force_dot(0) = -GeoCtrl_Kpx * v_error(0) - GeoCtrl_Kvx * a_error(0) + kg_vehicleMass * targetJerk(0);
+	target_force_dot(1) = -GeoCtrl_Kpy * v_error(1) - GeoCtrl_Kvy * a_error(1) + kg_vehicleMass * targetJerk(1);
+	target_force_dot(2) = -GeoCtrl_Kpz * v_error(2) - GeoCtrl_Kvz * a_error(2) + kg_vehicleMass * targetJerk(2);
 
-	const Vector3f body_z_axis_dot = rotation * omega.hat() * e3;
-	const float thrust_dot_newton_s = -target_force_dot.dot(body_z_axis) - target_force.dot(body_z_axis_dot);
+	const Vector3f b3_dot = R * hatOperator(Omega) * e3;
+	const float target_thrust_dot = -target_force_dot.dot(z_axis) - target_force.dot(b3_dot);
 
-	const Vector3f jerk_error =
-		-body_z_axis * (thrust_dot_newton_s / VEHICLE_MASS_KG)
-		- body_z_axis_dot * (thrust_newton / VEHICLE_MASS_KG)
-		- target_jerk;
+	const Vector3f j_error = -z_axis * target_thrust_dot / kg_vehicleMass
+				 - b3_dot * target_thrust / kg_vehicleMass - targetJerk;
 
 	Vector3f target_force_ddot;
-	target_force_ddot(0) = -KP_X * acceleration_error(0) - KV_X * jerk_error(0)
-			       + VEHICLE_MASS_KG * target_snap(0);
-	target_force_ddot(1) = -KP_Y * acceleration_error(1) - KV_Y * jerk_error(1)
-			       + VEHICLE_MASS_KG * target_snap(1);
-	target_force_ddot(2) = -KP_Z * acceleration_error(2) - KV_Z * jerk_error(2)
-			       + VEHICLE_MASS_KG * target_snap(2);
+	target_force_ddot(0) = -GeoCtrl_Kpx * a_error(0) - GeoCtrl_Kvx * j_error(0) + kg_vehicleMass * targetSnap(0);
+	target_force_ddot(1) = -GeoCtrl_Kpy * a_error(1) - GeoCtrl_Kvy * j_error(1) + kg_vehicleMass * targetSnap(1);
+	target_force_ddot(2) = -GeoCtrl_Kpz * a_error(2) - GeoCtrl_Kvz * j_error(2) + kg_vehicleMass * targetSnap(2);
 
-	Vector9f b3c_collection;
+	Vector9f b3cCollection;
 
-	if (!unit_vec_with_derivatives(-target_force, -target_force_dot, -target_force_ddot, b3c_collection)) {
+	if (!unit_vec(-target_force, -target_force_dot, -target_force_ddot, b3cCollection)) {
 		output.valid = false;
 		_last_output = output;
 		return true;
 	}
 
-	const Vector3f b3c{b3c_collection(0), b3c_collection(1), b3c_collection(2)};
-	const Vector3f b3c_dot{b3c_collection(3), b3c_collection(4), b3c_collection(5)};
-	const Vector3f b3c_ddot{b3c_collection(6), b3c_collection(7), b3c_collection(8)};
+	const Vector3f b3c{b3cCollection(0), b3cCollection(1), b3cCollection(2)};
+	const Vector3f b3c_dot{b3cCollection(3), b3cCollection(4), b3cCollection(5)};
+	const Vector3f b3c_ddot{b3cCollection(6), b3cCollection(7), b3cCollection(8)};
 
-	const float yaw = input.target_yaw;
-	const float yaw_rate = input.target_yaw_rate;
-	const float yaw_accel = input.target_yaw_accel;
-	const Vector3f x_c_des{cosf(yaw), sinf(yaw), 0.f};
-	const Vector3f x_c_des_dot{-sinf(yaw) * yaw_rate, cosf(yaw) * yaw_rate, 0.f};
-	const Vector3f x_c_des_ddot{
-		-cosf(yaw) * yaw_rate * yaw_rate - sinf(yaw) * yaw_accel,
-		-sinf(yaw) * yaw_rate * yaw_rate + cosf(yaw) * yaw_accel,
-		0.f
-	};
+	const Vector3f A2 = -(hatOperator(x_c_des) * b3c);
+	const Vector3f A2_dot = -(hatOperator(x_c_des_dot) * b3c) - hatOperator(x_c_des) * b3c_dot;
+	const Vector3f A2_ddot = -(hatOperator(x_c_des_ddot) * b3c)
+				 - hatOperator(x_c_des_dot) * b3c_dot * 2.f
+				 - hatOperator(x_c_des) * b3c_ddot;
 
-	const Vector3f a2 = b3c.cross(x_c_des);
-	const Vector3f a2_dot = b3c.cross(x_c_des_dot) + b3c_dot.cross(x_c_des);
-	const Vector3f a2_ddot = b3c.cross(x_c_des_ddot)
-				 + b3c_dot.cross(x_c_des_dot) * 2.f
-				 + b3c_ddot.cross(x_c_des);
+	Vector9f b2cCollection;
 
-	Vector9f b2c_collection;
-
-	if (!unit_vec_with_derivatives(a2, a2_dot, a2_ddot, b2c_collection)) {
+	if (!unit_vec(A2, A2_dot, A2_ddot, b2cCollection)) {
 		output.valid = false;
 		_last_output = output;
 		return true;
 	}
 
-	const Vector3f b2c{b2c_collection(0), b2c_collection(1), b2c_collection(2)};
-	const Vector3f b2c_dot{b2c_collection(3), b2c_collection(4), b2c_collection(5)};
-	const Vector3f b2c_ddot{b2c_collection(6), b2c_collection(7), b2c_collection(8)};
+	const Vector3f b2c{b2cCollection(0), b2cCollection(1), b2cCollection(2)};
+	const Vector3f b2c_dot{b2cCollection(3), b2cCollection(4), b2cCollection(5)};
+	const Vector3f b2c_ddot{b2cCollection(6), b2cCollection(7), b2cCollection(8)};
 
-	Vector3f b1c = b2c.cross(b3c);
+	const Vector3f b1c_dot = hatOperator(b2c_dot) * b3c + hatOperator(b2c) * b3c_dot;
+	const Vector3f b1c_ddot = hatOperator(b2c_ddot) * b3c + hatOperator(b2c_dot) * b3c_dot * 2.f
+				  + hatOperator(b2c) * b3c_ddot;
 
-	if (!is_normalizable(b1c)) {
-		output.valid = false;
-		_last_output = output;
-		return true;
-	}
+	Matrix3f Rd_dot{};
+	Rd_dot.setCol(0, b1c_dot);
+	Rd_dot.setCol(1, b2c_dot);
+	Rd_dot.setCol(2, b3c_dot);
 
-	b1c.normalize();
+	Matrix3f Rd_ddot{};
+	Rd_ddot.setCol(0, b1c_ddot);
+	Rd_ddot.setCol(1, b2c_ddot);
+	Rd_ddot.setCol(2, b3c_ddot);
 
-	const Vector3f b1c_dot = b2c_dot.cross(b3c) + b2c.cross(b3c_dot);
-	const Vector3f b1c_ddot = b2c_ddot.cross(b3c)
-				  + b2c_dot.cross(b3c_dot) * 2.f
-				  + b2c.cross(b3c_ddot);
+	const Vector3f Omegad = veeOperator(Rdes.transpose() * Rd_dot);
+	const Vector3f Omegad_dot = veeOperator(Rdes.transpose() * Rd_ddot - hatOperator(Omegad) * hatOperator(Omegad));
 
-	Matrix3f desired_rotation{};
-	desired_rotation.setCol(0, b1c);
-	desired_rotation.setCol(1, b2c);
-	desired_rotation.setCol(2, b3c);
+	// eomega (angular velocity error)
+	const Vector3f ew = Omega - R.transpose() * Rdes * Omegad;
 
-	Matrix3f desired_rotation_dot{};
-	desired_rotation_dot.setCol(0, b1c_dot);
-	desired_rotation_dot.setCol(1, b2c_dot);
-	desired_rotation_dot.setCol(2, b3c_dot);
+	// Compute the moment
+	Vector3f M;
+	M(0) = -GeoCtrl_KRx * eR(0) - GeoCtrl_KOx * ew(0);
+	M(1) = -GeoCtrl_KRy * eR(1) - GeoCtrl_KOy * ew(1);
+	M(2) = -GeoCtrl_KRz * eR(2) - GeoCtrl_KOz * ew(2);
+	M = M - J * (hatOperator(Omega) * R.transpose() * Rdes * Omegad - R.transpose() * Rdes * Omegad_dot);
+	const Vector3f momentAdd = Omega.cross(J * Omega);
+	M = M + momentAdd;
 
-	Matrix3f desired_rotation_ddot{};
-	desired_rotation_ddot.setCol(0, b1c_ddot);
-	desired_rotation_ddot.setCol(1, b2c_ddot);
-	desired_rotation_ddot.setCol(2, b3c_ddot);
-
-	const Matrix3f rotation_error_matrix =
-		(desired_rotation.transpose() * rotation - rotation.transpose() * desired_rotation) * 0.5f;
-	const Vector3f rotation_error = Dcmf{rotation_error_matrix}.vee();
-
-	const Vector3f desired_angular_velocity = Dcmf{desired_rotation.transpose() * desired_rotation_dot}.vee();
-	const Dcmf desired_angular_velocity_hat = desired_angular_velocity.hat();
-	const Vector3f desired_angular_acceleration =
-		Dcmf{desired_rotation.transpose() * desired_rotation_ddot
-		     - desired_angular_velocity_hat * desired_angular_velocity_hat}.vee();
-
-	const Matrix3f rotation_transpose_desired = rotation.transpose() * desired_rotation;
-	const Vector3f desired_angular_velocity_in_body = rotation_transpose_desired * desired_angular_velocity;
-	const Vector3f desired_angular_acceleration_in_body = rotation_transpose_desired * desired_angular_acceleration;
-	const Vector3f angular_velocity_error = omega - desired_angular_velocity_in_body;
-
-	const Vector3f pd_moment{
-		-KR_X * rotation_error(0) - KO_X * angular_velocity_error(0),
-		-KR_Y * rotation_error(1) - KO_Y * angular_velocity_error(1),
-		-KR_Z * rotation_error(2) - KO_Z * angular_velocity_error(2)
-	};
-
-	Matrix3f inertia{};
-	inertia(0, 0) = JXX_KGM2;
-	inertia(1, 1) = JYY_KGM2;
-	inertia(2, 2) = JZZ_KGM2;
-
-	const Vector3f feedforward_argument =
-		omega.hat() * desired_angular_velocity_in_body - desired_angular_acceleration_in_body;
-	const Vector3f feedforward_moment = -(inertia * feedforward_argument);
-	const Vector3f j_omega = inertia * omega;
-	const Vector3f gyro_moment = omega.cross(j_omega);
-	const Vector3f moment = pd_moment + feedforward_moment + gyro_moment;
-
-	copy_vector(position_error, output.position_error_ned);
-	copy_vector(velocity_error, output.velocity_error_ned);
-	copy_vector(acceleration_error, output.acceleration_error_ned);
-	copy_vector(jerk_error, output.jerk_error_ned);
-	copy_vector(target_force, output.target_force_ned);
-	copy_vector(target_force_dot, output.target_force_dot_ned);
-	copy_vector(target_force_ddot, output.target_force_ddot_ned);
-	copy_vector(body_z_axis, output.body_z_axis_ned);
-	copy_vector(body_z_axis_dot, output.body_z_axis_dot_ned);
-	output.target_thrust_dot_newton_s = thrust_dot_newton_s;
-
-	copy_vector(b1c, output.desired_body_x_axis_ned);
-	copy_vector(b2c, output.desired_body_y_axis_ned);
-	copy_vector(b3c, output.desired_body_z_axis_ned);
-	copy_vector(b1c_dot, output.desired_body_x_axis_dot_ned);
-	copy_vector(b2c_dot, output.desired_body_y_axis_dot_ned);
-	copy_vector(b3c_dot, output.desired_body_z_axis_dot_ned);
-	copy_vector(b1c_ddot, output.desired_body_x_axis_ddot_ned);
-	copy_vector(b2c_ddot, output.desired_body_y_axis_ddot_ned);
-	copy_vector(b3c_ddot, output.desired_body_z_axis_ddot_ned);
-
-	copy_matrix(desired_rotation, output.desired_rotation_matrix);
-	copy_matrix(desired_rotation_dot, output.desired_rotation_matrix_dot);
-	copy_matrix(desired_rotation_ddot, output.desired_rotation_matrix_ddot);
-
-	copy_vector(b3c, output.b3c_ned);
-	copy_vector(b3c_dot, output.b3c_dot_ned);
-	copy_vector(b3c_ddot, output.b3c_ddot_ned);
-	copy_vector(a2, output.a2_ned);
-	copy_vector(a2_dot, output.a2_dot_ned);
-	copy_vector(a2_ddot, output.a2_ddot_ned);
-	copy_vector(b2c, output.b2c_ned);
-	copy_vector(b2c_dot, output.b2c_dot_ned);
-	copy_vector(b2c_ddot, output.b2c_ddot_ned);
-
-	copy_vector(rotation_error, output.rotation_error);
-	copy_vector(desired_angular_velocity, output.desired_angular_velocity_body);
-	copy_vector(desired_angular_acceleration, output.desired_angular_acceleration_body);
-	copy_vector(angular_velocity_error, output.angular_velocity_error);
-	copy_vector(pd_moment, output.pd_moment_newton_meter);
-	copy_vector(feedforward_moment, output.feedforward_moment_newton_meter);
-	copy_vector(j_omega, output.j_omega_body);
-	copy_vector(gyro_moment, output.gyro_moment_newton_meter);
-	copy_vector(moment, output.moment_newton_meter);
-	output.thrust_newton = thrust_newton;
-
-	output.valid = output_is_finite(output) && output.thrust_newton > 0.f;
+	copy_vector(r_error, output.r_error);
+	copy_vector(v_error, output.v_error);
+	copy_vector(M, output.M);
+	output.target_thrust = target_thrust;
+	output.valid = output_is_finite(output) && output.target_thrust > 0.f;
 
 	if (!output.valid) {
-		for (int i = 0; i < 3; i++) {
-			output.moment_newton_meter[i] = 0.f;
-		}
-
-		output.thrust_newton = 0.f;
+		output.M[0] = 0.f;
+		output.M[1] = 0.f;
+		output.M[2] = 0.f;
+		output.target_thrust = 0.f;
 	}
 
 	_last_output = output;
