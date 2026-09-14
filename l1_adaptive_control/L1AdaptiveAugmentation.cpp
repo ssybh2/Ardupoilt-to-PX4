@@ -42,35 +42,30 @@ void copy2(const Vector2f &input, float output[2])
 
 void L1AdaptiveAugmentation::reset()
 {
+	// Treat the next valid sample as a new ModeAdaptive::init() entry.  Do not
+	// erase sigma_m_hat_prev / sigma_um_hat_prev here: the upstream init()
+	// function does not clear those two persistent estimates either.
 	_initialized = false;
-	_v_hat_prev = Vector3f{};
-	_omega_hat_prev = Vector3f{};
-	_v_prev = Vector3f{};
-	_omega_prev = Vector3f{};
-	_R_prev = Dcmf{};
-	_u_b_prev = Vector4f{};
-	_u_ad_prev = Vector4f{};
-	_sigma_m_hat_prev = Vector4f{};
-	_sigma_um_hat_prev = Vector2f{};
-	_lpf1_prev = Vector4f{};
-	_lpf2_prev = Vector4f{};
 }
 
 void L1AdaptiveAugmentation::initialize_from_input(const Input &input)
 {
-	// Source-equivalent ModeAdaptive::init() state.  In particular u_b_prev is
-	// zero here; the current baseline is stored only at the end of the first
-	// L1AdaptiveAugmentation update.
+	// Literal ModeAdaptive::init() state setup.
 	_v_hat_prev = Vector3f{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
 	_v_prev = _v_hat_prev;
 	_omega_hat_prev = Vector3f{input.angular_velocity_body[0], input.angular_velocity_body[1],
 				    input.angular_velocity_body[2]};
 	_omega_prev = _omega_hat_prev;
-	_R_prev = Dcmf{Quatf{input.quat_body_to_ned}};
+
+	// Upstream code does:
+	//     Quaternion q;
+	//     q.rotation_matrix(R_prev);
+	// ArduPilot's default Quaternion is [1,0,0,0], so R_prev is identity here;
+	// it is intentionally NOT initialized from the current measured attitude.
+	_R_prev = Dcmf{};
+
 	_u_b_prev = Vector4f{};
 	_u_ad_prev = Vector4f{};
-	_sigma_m_hat_prev = Vector4f{};
-	_sigma_um_hat_prev = Vector2f{};
 	_lpf1_prev = Vector4f{};
 	_lpf2_prev = Vector4f{};
 	_initialized = true;
