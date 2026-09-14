@@ -2,6 +2,8 @@
 
 #include "GeometricController.hpp"
 #include "L1AdaptiveAugmentation.hpp"
+#include "L1SourceConfig.hpp"
+#include "MotorMixer.hpp"
 #include "TrajectoryGenerator.hpp"
 
 #include <px4_platform_common/defines.h>
@@ -15,131 +17,115 @@
 
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
-#include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/actuator_motors.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
-#include <uORB/topics/manual_control_setpoint.h>
+#include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/vehicle_status.h>
-#include <uORB/topics/vehicle_thrust_setpoint.h>
-#include <uORB/topics/vehicle_torque_setpoint.h>
 
 using namespace time_literals;
 
 class L1AdaptiveControl :
-public ModuleBase<L1AdaptiveControl>,
-public ModuleParams,
-public px4::ScheduledWorkItem
+	public ModuleBase<L1AdaptiveControl>,
+	public ModuleParams,
+	public px4::ScheduledWorkItem
 {
 public:
-L1AdaptiveControl();
-~L1AdaptiveControl() override;
+	L1AdaptiveControl();
+	~L1AdaptiveControl() override;
 
-static int task_spawn(int argc, char *argv[]);
-static int custom_command(int argc, char *argv[]);
-static int print_usage(const char *reason = nullptr);
+	static int task_spawn(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
 
-bool init();
+	bool init();
+	int print_status() override;
 
-int print_status() override;
-
-void set_rc_height_control_enabled(bool enabled);
-bool rc_height_control_enabled() const { return _rc_height_control_enabled.load(); }
-void set_trajectory_mode(TrajectoryGenerator::CommandedMode mode);
-TrajectoryGenerator::CommandedMode trajectory_mode() const
-{
-return static_cast<TrajectoryGenerator::CommandedMode>(_trajectory_command_mode.load());
-}
+	void set_trajectory_index(uint8_t trajectory_index);
+	uint8_t trajectory_index() const { return _trajectory_index.load(); }
+	void set_land_flag(bool enabled) { _land_flag.store(enabled); }
+	bool land_flag() const { return _land_flag.load(); }
+	void set_l1_enabled(bool enabled);
+	bool l1_enabled() const { return _l1_enabled.load(); }
 
 private:
-struct InternalState {
-hrt_abstime timestamp_us{0};
+	struct InternalState {
+		hrt_abstime timestamp_us{0};
+		float position_ned[3]{0.f, 0.f, 0.f};
+		float velocity_ned[3]{0.f, 0.f, 0.f};
+		float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};
+		float angular_velocity_body[3]{0.f, 0.f, 0.f};
+		bool position_valid{false};
+		bool velocity_valid{false};
+		bool attitude_valid{false};
+		bool angular_velocity_valid{false};
+		bool armed{false};
+		bool failsafe{false};
+		uint8_t arming_state{0};
+		uint8_t nav_state{0};
+	};
 
-float position_ned[3]{0.f, 0.f, 0.f};
-float velocity_ned[3]{0.f, 0.f, 0.f};
+	void Run() override;
+	void configure_source_parameters();
+	void update_subscriptions();
+	void update_internal_state();
+	void update_trajectory_input();
+	void run_trajectory_generator();
+	void update_controller_input();
+	void run_geometric_controller();
+	void run_l1_adaptive_augmentation();
+	void run_motor_mixer();
+	void publish_motor_commands();
+	void print_debug_info();
 
-float quat_body_to_ned[4]{1.f, 0.f, 0.f, 0.f};
-float angular_velocity_body[3]{0.f, 0.f, 0.f};
+	uORB::Subscription _vehicle_local_position_sub{ORB_ID(vehicle_local_position)};
+	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
+	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
+	uORB::Publication<actuator_motors_s> _actuator_motors_pub{ORB_ID(actuator_motors)};
 
-bool position_valid{false};
-bool velocity_valid{false};
-bool attitude_valid{false};
-bool angular_velocity_valid{false};
+	vehicle_local_position_s _vehicle_local_position{};
+	vehicle_attitude_s _vehicle_attitude{};
+	vehicle_angular_velocity_s _vehicle_angular_velocity{};
+	vehicle_status_s _vehicle_status{};
 
-bool armed{false};
-bool failsafe{false};
-uint8_t arming_state{0};
-uint8_t nav_state{0};
-};
+	bool _has_local_position{false};
+	bool _has_attitude{false};
+	bool _has_angular_velocity{false};
+	bool _has_vehicle_status{false};
 
-void Run() override;
+	px4::atomic<uint8_t> _trajectory_index{0};
+	px4::atomic_bool _land_flag{false};
+	px4::atomic_bool _l1_enabled{false};
 
-void update_subscriptions();
-void update_internal_state();
+	InternalState _state{};
+	bool _state_valid_for_control{false};
 
-void update_trajectory_input();
-void run_trajectory_generator();
-void update_manual_height_control_input();
-void apply_trajectory_command();
+	TrajectoryGenerator _trajectory_generator{};
+	TrajectoryGenerator::Input _trajectory_input{};
+	TrajectoryGenerator::Output _trajectory_output{};
+	bool _trajectory_update_executed{false};
 
-void update_controller_input();
-void run_geometric_controller();
-void run_l1_adaptive_augmentation();
+	GeometricController _geometric_controller{};
+	GeometricController::Input _controller_input{};
+	GeometricController::Output _geometric_output{};
+	bool _geometric_update_executed{false};
 
-void publish_control_setpoints();
+	L1AdaptiveAugmentation _l1_adaptive_augmentation{};
+	L1AdaptiveAugmentation::Output _l1_output{};
+	bool _l1_update_executed{false};
 
-void print_debug_info();
+	MotorMixer _motor_mixer{};
+	MotorMixer::MotorCommand _motor_command{};
+	bool _motor_mix_executed{false};
 
-uORB::Subscription _vehicle_local_position_sub{ORB_ID(vehicle_local_position)};
-uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
-uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
-uORB::Subscription _manual_control_setpoint_sub{ORB_ID(manual_control_setpoint)};
-uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
+	float _baseline_thrust_moment[4]{0.f, 0.f, 0.f, 0.f};
+	float _combined_thrust_moment[4]{0.f, 0.f, 0.f, 0.f};
+	float _published_motor_control[4]{0.f, 0.f, 0.f, 0.f};
+	bool _actuator_motors_published{false};
+	uint32_t _actuator_publish_count{0};
 
-uORB::Publication<vehicle_thrust_setpoint_s> _vehicle_thrust_setpoint_pub{ORB_ID(vehicle_thrust_setpoint)};
-uORB::Publication<vehicle_torque_setpoint_s> _vehicle_torque_setpoint_pub{ORB_ID(vehicle_torque_setpoint)};
-
-vehicle_local_position_s _vehicle_local_position{};
-vehicle_attitude_s _vehicle_attitude{};
-vehicle_angular_velocity_s _vehicle_angular_velocity{};
-manual_control_setpoint_s _manual_control_setpoint{};
-vehicle_status_s _vehicle_status{};
-
-bool _has_local_position{false};
-bool _has_attitude{false};
-bool _has_angular_velocity{false};
-bool _has_manual_control_setpoint{false};
-bool _has_vehicle_status{false};
-
-px4::atomic_bool _rc_height_control_enabled{false};
-px4::atomic<uint8_t> _trajectory_command_mode{static_cast<uint8_t>(TrajectoryGenerator::CommandedMode::Hover)};
-bool _manual_height_control_valid{false};
-float _manual_height_stick{0.f};
-
-InternalState _state{};
-bool _state_valid_for_control{false};
-
-TrajectoryGenerator _trajectory_generator{};
-TrajectoryGenerator::Input _trajectory_input{};
-TrajectoryGenerator::Output _trajectory_output{};
-bool _trajectory_update_executed{false};
-
-GeometricController _geometric_controller{};
-GeometricController::Input _controller_input{};
-GeometricController::Output _geometric_output{};
-bool _geometric_update_executed{false};
-
-L1AdaptiveAugmentation _l1_adaptive_augmentation{};
-float _l1_output_thrust_moment[4]{0.f, 0.f, 0.f, 0.f};
-float _combined_thrust_moment[4]{0.f, 0.f, 0.f, 0.f};
-bool _l1_update_executed{false};
-
-float _published_thrust_body[3]{0.f, 0.f, 0.f};
-float _published_torque_body[3]{0.f, 0.f, 0.f};
-bool _control_setpoint_published{false};
-uint32_t _control_setpoint_publish_count{0};
-
-perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
-perf_counter_t _loop_interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME": interval")};
-
-hrt_abstime _last_print_us{0};
+	perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME ": cycle")};
+	perf_counter_t _loop_interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME ": interval")};
+	hrt_abstime _last_print_us{0};
 };
