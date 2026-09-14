@@ -6,6 +6,7 @@ namespace
 {
 
 static constexpr float kTolerance = 1e-4f;
+static constexpr hrt_abstime kSourceStepUs = 2'500;
 
 TrajectoryGenerator::Input make_valid_input(hrt_abstime timestamp_us)
 {
@@ -32,15 +33,25 @@ TrajectoryGenerator::Output update_at(TrajectoryGenerator &generator, hrt_abstim
 	return output;
 }
 
+TrajectoryGenerator::Output advance_source_time(TrajectoryGenerator &generator,
+		hrt_abstime start_us, float duration_s)
+{
+	TrajectoryGenerator::Output output = update_at(generator, start_us);
+	const int steps = static_cast<int>(duration_s / 0.0025f + 0.5f);
+
+	for (int i = 1; i <= steps; i++) {
+		output = update_at(generator, start_us + static_cast<hrt_abstime>(i) * kSourceStepUs);
+	}
+
+	return output;
+}
+
 } // namespace
 
 TEST(TrajectoryGenerator, TakeoffUsesOriginalACRLPolynomial)
 {
 	TrajectoryGenerator generator;
-
-	// First valid sample corresponds to entering ModeAdaptive and timeInThisRun = 0.
-	update_at(generator, 1'000'000);
-	const TrajectoryGenerator::Output output = update_at(generator, 2'000'000);
+	const TrajectoryGenerator::Output output = advance_source_time(generator, 1'000'000, 1.f);
 
 	// Original ACRL polynomial at t=1 s:
 	// p(t) = -0.1563 t^7 + 1.0938 t^6 - 2.6250 t^5 + 2.1875 t^4.
@@ -65,8 +76,7 @@ TEST(TrajectoryGenerator, FixedYawCircleUsesOriginalACRLInitialState)
 	parameters.target_speed = 0.5f;
 	generator.set_parameters(parameters);
 
-	update_at(generator, 1'000'000);
-	const TrajectoryGenerator::Output circle = update_at(generator, 3'000'000);
+	const TrajectoryGenerator::Output circle = advance_source_time(generator, 1'000'000, 2.f);
 
 	// Original SITL circle_fixed_yaw at timeInThisRun=2, radius=1, speed=0.5.
 	EXPECT_NEAR(circle.time_in_this_run_s, 2.f, kTolerance);
@@ -86,10 +96,9 @@ TEST(TrajectoryGenerator, FixedYawCircleUsesOriginalACRLInitialState)
 TEST(TrajectoryGenerator, InvalidStateResetsSourceRunTiming)
 {
 	TrajectoryGenerator generator;
-	update_at(generator, 1'000'000);
-	update_at(generator, 1'500'000);
+	advance_source_time(generator, 1'000'000, 0.5f);
 
-	TrajectoryGenerator::Input invalid = make_valid_input(2'000'000);
+	TrajectoryGenerator::Input invalid = make_valid_input(1'502'500);
 	invalid.armed = false;
 	TrajectoryGenerator::Output invalid_output{};
 	EXPECT_FALSE(generator.update(invalid, invalid_output));
