@@ -1,8 +1,8 @@
 #include "L1AdaptiveAugmentation.hpp"
 
-#include <math.h>
-#include <mathlib/mathlib.h>
 #include <matrix/matrix/math.hpp>
+
+#include <math.h>
 
 using matrix::Dcmf;
 using matrix::Matrix3f;
@@ -14,51 +14,66 @@ using matrix::Vector4f;
 namespace
 {
 
-static constexpr float VEHICLE_MASS_KG = 3.0f;
-static constexpr float GRAVITY_MSS = 9.80665f;
+static constexpr float GRAVITY_MAGNITUDE = 9.80665f;
+static constexpr float SOURCE_DT = 0.0025f;
 
-static constexpr float JXX_KGM2 = 0.023f;
-static constexpr float JYY_KGM2 = 0.023f;
-static constexpr float JZZ_KGM2 = 0.0459f;
-
-static constexpr float JINV_XX = 43.478f;
-static constexpr float JINV_YY = 43.478f;
-static constexpr float JINV_ZZ = 21.786f;
-
-static constexpr bool L1_ENABLE = true;
-static constexpr float L1_AS_V = -5.0f;
-static constexpr float L1_AS_OMEGA = -10.0f;
-static constexpr float L1_CUTOFF_Q1_THRUST = 10.0f;
-static constexpr float L1_CUTOFF_Q1_MOMENT = 10.0f;
-static constexpr float L1_CUTOFF_Q2_MOMENT = 2.0f;
-
-static constexpr float MAX_L1_THRUST_N = VEHICLE_MASS_KG * GRAVITY_MSS * 0.35f;
-static constexpr float MAX_L1_ROLL_PITCH_MOMENT_NM = 0.35f;
-static constexpr float MAX_L1_YAW_MOMENT_NM = 0.20f;
-static constexpr float ADAPTIVE_LIMITS[4] = {
-	MAX_L1_THRUST_N,
-	MAX_L1_ROLL_PITCH_MOMENT_NM,
-	MAX_L1_ROLL_PITCH_MOMENT_NM,
-	MAX_L1_YAW_MOMENT_NM
-};
-
-float phi_inverse_mu(float prediction_error, float as_value, float dt)
+void copy3(const Vector3f &input, float output[3])
 {
-	const float exp_as_dt = expf(as_value * dt);
-	const float denominator = exp_as_dt - 1.0f;
-
-	if (fabsf(denominator) < 1e-5f || fabsf(as_value) < 1e-5f) {
-		return 0.f;
+	for (int i = 0; i < 3; i++) {
+		output[i] = input(i);
 	}
+}
 
-	return prediction_error / denominator * as_value * exp_as_dt;
+void copy4(const Vector4f &input, float output[4])
+{
+	for (int i = 0; i < 4; i++) {
+		output[i] = input(i);
+	}
+}
+
+void copy2(const Vector2f &input, float output[2])
+{
+	for (int i = 0; i < 2; i++) {
+		output[i] = input(i);
+	}
 }
 
 } // namespace
 
 void L1AdaptiveAugmentation::reset()
 {
-	_state = State{};
+	_initialized = false;
+	_v_hat_prev = Vector3f{};
+	_omega_hat_prev = Vector3f{};
+	_v_prev = Vector3f{};
+	_omega_prev = Vector3f{};
+	_R_prev = Dcmf{};
+	_u_b_prev = Vector4f{};
+	_u_ad_prev = Vector4f{};
+	_sigma_m_hat_prev = Vector4f{};
+	_sigma_um_hat_prev = Vector2f{};
+	_lpf1_prev = Vector4f{};
+	_lpf2_prev = Vector4f{};
+}
+
+void L1AdaptiveAugmentation::initialize_from_input(const Input &input)
+{
+	// Source-equivalent ModeAdaptive::init() state.  In particular u_b_prev is
+	// zero here; the current baseline is stored only at the end of the first
+	// L1AdaptiveAugmentation update.
+	_v_hat_prev = Vector3f{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
+	_v_prev = _v_hat_prev;
+	_omega_hat_prev = Vector3f{input.angular_velocity_body[0], input.angular_velocity_body[1],
+				    input.angular_velocity_body[2]};
+	_omega_prev = _omega_hat_prev;
+	_R_prev = Dcmf{Quatf{input.quat_body_to_ned}};
+	_u_b_prev = Vector4f{};
+	_u_ad_prev = Vector4f{};
+	_sigma_m_hat_prev = Vector4f{};
+	_sigma_um_hat_prev = Vector2f{};
+	_lpf1_prev = Vector4f{};
+	_lpf2_prev = Vector4f{};
+	_initialized = true;
 }
 
 bool L1AdaptiveAugmentation::update(const Input &input, Output &output)
@@ -70,147 +85,131 @@ bool L1AdaptiveAugmentation::update(const Input &input, Output &output)
 		return false;
 	}
 
-	const Vector3f velocity_now{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
+	if (!_initialized) {
+		initialize_from_input(input);
+	}
+
+	// Direct modular extraction of ModeAdaptive::L1AdaptiveAugmentation().
+	Vector3f v_hat;
+	Vector3f omega_hat;
+	const Vector3f e3{0.f, 0.f, 1.f};
+	const float dt = SOURCE_DT;
+	const int8_t l1enable = _parameters.l1_enable;
+
+	const Vector3f v_now{input.velocity_ned[0], input.velocity_ned[1], input.velocity_ned[2]};
+	const float As_v = _parameters.as_v;
+	const float As_omega = _parameters.as_omega;
 	const Vector3f omega_now{input.angular_velocity_body[0], input.angular_velocity_body[1],
 				 input.angular_velocity_body[2]};
-	Vector4f baseline_thrust_moment{};
+	const float kg_vehicleMass = _parameters.mass_kg;
+	const float massInverse = 1.0f / kg_vehicleMass;
 
-	for (int i = 0; i < 4; i++) {
-		baseline_thrust_moment(i) = input.baseline_thrust_moment[i];
-	}
+	Matrix3f J{};
+	J(0, 0) = _parameters.inertia_kg_m2[0];
+	J(1, 1) = _parameters.inertia_kg_m2[1];
+	J(2, 2) = _parameters.inertia_kg_m2[2];
 
-	const Dcmf rotation{Quatf{input.quat_body_to_ned}};
-	const Vector3f body_x{rotation.col(0)};
-	const Vector3f body_y{rotation.col(1)};
-	const Vector3f body_z{rotation.col(2)};
-	const Vector3f e3{0.f, 0.f, 1.f};
+	Matrix3f Jinv{};
+	Jinv(0, 0) = _parameters.inertia_inverse[0];
+	Jinv(1, 1) = _parameters.inertia_inverse[1];
+	Jinv(2, 2) = _parameters.inertia_inverse[2];
 
-	Matrix3f inertia{};
-	inertia(0, 0) = JXX_KGM2;
-	inertia(1, 1) = JYY_KGM2;
-	inertia(2, 2) = JZZ_KGM2;
+	const Vector3f vpred_error_prev = _v_hat_prev - _v_prev;
+	const Vector3f omegapred_error_prev = _omega_hat_prev - _omega_prev;
 
-	Matrix3f inertia_inverse{};
-	inertia_inverse(0, 0) = JINV_XX;
-	inertia_inverse(1, 1) = JINV_YY;
-	inertia_inverse(2, 2) = JINV_ZZ;
+	v_hat = _v_hat_prev
+		+ (e3 * GRAVITY_MAGNITUDE
+		   - _R_prev.col(2) * (_u_b_prev(0) + _u_ad_prev(0) + _sigma_m_hat_prev(0)) * massInverse
+		   + _R_prev.col(0) * _sigma_um_hat_prev(0) * massInverse
+		   + _R_prev.col(1) * _sigma_um_hat_prev(1) * massInverse
+		   + vpred_error_prev * As_v) * dt;
 
-	if (!_state.initialized) {
-		_state.velocity_hat_prev = velocity_now;
-		_state.velocity_prev = velocity_now;
-		_state.angular_velocity_hat_prev = omega_now;
-		_state.angular_velocity_prev = omega_now;
-		_state.rotation_body_to_ned_prev = rotation;
-		_state.baseline_thrust_moment_prev = baseline_thrust_moment;
-		_state.last_update_us = input.timestamp_us;
-		_state.initialized = true;
-	}
-
-	const float dt = math::constrain((input.timestamp_us - _state.last_update_us) * 1e-6f, 0.001f, 0.02f);
-
-	const Vector3f velocity_prediction_error_prev = _state.velocity_hat_prev - _state.velocity_prev;
-	const Vector3f angular_prediction_error_prev =
-		_state.angular_velocity_hat_prev - _state.angular_velocity_prev;
-
-	const float previous_total_thrust =
-		_state.baseline_thrust_moment_prev(0)
-		+ _state.adaptive_thrust_moment_prev(0)
-		+ _state.sigma_matched_prev(0);
-
-	const Vector3f body_x_prev{_state.rotation_body_to_ned_prev.col(0)};
-	const Vector3f body_y_prev{_state.rotation_body_to_ned_prev.col(1)};
-	const Vector3f body_z_prev{_state.rotation_body_to_ned_prev.col(2)};
-
-	const Vector3f velocity_hat =
-		_state.velocity_hat_prev
-		+ (e3 * GRAVITY_MSS
-		   - body_z_prev * (previous_total_thrust / VEHICLE_MASS_KG)
-		   + body_x_prev * (_state.sigma_unmatched_prev(0) / VEHICLE_MASS_KG)
-		   + body_y_prev * (_state.sigma_unmatched_prev(1) / VEHICLE_MASS_KG)
-		   + velocity_prediction_error_prev * L1_AS_V) * dt;
-
-	const Vector3f previous_total_moment{
-		_state.baseline_thrust_moment_prev(1) + _state.adaptive_thrust_moment_prev(1) + _state.sigma_matched_prev(1),
-		_state.baseline_thrust_moment_prev(2) + _state.adaptive_thrust_moment_prev(2) + _state.sigma_matched_prev(2),
-		_state.baseline_thrust_moment_prev(3) + _state.adaptive_thrust_moment_prev(3) + _state.sigma_matched_prev(3)
+	const Vector3f tempVec{
+		_u_b_prev(1) + _u_ad_prev(1) + _sigma_m_hat_prev(1),
+		_u_b_prev(2) + _u_ad_prev(2) + _sigma_m_hat_prev(2),
+		_u_b_prev(3) + _u_ad_prev(3) + _sigma_m_hat_prev(3)
 	};
 
-	const Vector3f gyro_moment_prev =
-		_state.angular_velocity_prev.cross(inertia * _state.angular_velocity_prev);
+	omega_hat = _omega_hat_prev
+		+ (-(Jinv * _omega_prev.cross(J * _omega_prev))
+		   + Jinv * tempVec
+		   + omegapred_error_prev * As_omega) * dt;
 
-	const Vector3f angular_velocity_hat =
-		_state.angular_velocity_hat_prev
-		+ (-(inertia_inverse * gyro_moment_prev)
-		   + inertia_inverse * previous_total_moment
-		   + angular_prediction_error_prev * L1_AS_OMEGA) * dt;
+	// Same storage order as the source implementation.
+	_v_hat_prev = v_hat;
+	_omega_hat_prev = omega_hat;
 
-	const Vector3f velocity_prediction_error = velocity_hat - velocity_now;
-	const Vector3f angular_prediction_error = angular_velocity_hat - omega_now;
+	const Vector3f vpred_error = v_hat - v_now;
+	const Vector3f omegapred_error = omega_hat - omega_now;
 
-	Vector3f phi_inv_mu_v{};
-	Vector3f phi_inv_mu_omega{};
+	const float exp_As_v_dt = expf(As_v * dt);
+	const float exp_As_omega_dt = expf(As_omega * dt);
 
-	for (int i = 0; i < 3; i++) {
-		phi_inv_mu_v(i) = phi_inverse_mu(velocity_prediction_error(i), L1_AS_V, dt);
-		phi_inv_mu_omega(i) = phi_inverse_mu(angular_prediction_error(i), L1_AS_OMEGA, dt);
-	}
+	const Vector3f PhiInvmu_v = vpred_error / (exp_As_v_dt - 1.f) * As_v * exp_As_v_dt;
+	const Vector3f PhiInvmu_omega = omegapred_error / (exp_As_omega_dt - 1.f) * As_omega * exp_As_omega_dt;
 
-	Vector4f sigma_matched{};
-	Vector2f sigma_unmatched{};
+	Vector4f sigma_m_hat{};
+	Vector2f sigma_um_hat{};
+	const Dcmf R{Quatf{input.quat_body_to_ned}};
 
-	sigma_matched(0) = body_z.dot(phi_inv_mu_v) * VEHICLE_MASS_KG;
-	const Vector3f sigma_matched_moment = -(inertia * phi_inv_mu_omega);
+	sigma_m_hat(0) = R.col(2).dot(PhiInvmu_v) * kg_vehicleMass;
+	const Vector3f sigma_m_hat_2to4 = -(J * PhiInvmu_omega);
+	sigma_m_hat(1) = sigma_m_hat_2to4(0);
+	sigma_m_hat(2) = sigma_m_hat_2to4(1);
+	sigma_m_hat(3) = sigma_m_hat_2to4(2);
 
-	for (int i = 0; i < 3; i++) {
-		sigma_matched(i + 1) = sigma_matched_moment(i);
-	}
+	sigma_um_hat(0) = -R.col(0).dot(PhiInvmu_v) * kg_vehicleMass;
+	sigma_um_hat(1) = -R.col(1).dot(PhiInvmu_v) * kg_vehicleMass;
 
-	sigma_unmatched(0) = -body_x.dot(phi_inv_mu_v) * VEHICLE_MASS_KG;
-	sigma_unmatched(1) = -body_y.dot(phi_inv_mu_v) * VEHICLE_MASS_KG;
+	_sigma_m_hat_prev = sigma_m_hat;
+	_sigma_um_hat_prev = sigma_um_hat;
 
-	const float lpf2_moment_keep = expf(-L1_CUTOFF_Q2_MOMENT * dt);
-	Vector4f lpf1{};
-	Vector4f lpf2{};
+	const float lpf1_coefficientThrust1 = expf(-_parameters.cutoff_q1_thrust * 0.0025f);
+	const float lpf1_coefficientThrust2 = 1.0f - lpf1_coefficientThrust1;
+	const float lpf1_coefficientMoment1 = expf(-_parameters.cutoff_q1_moment * 0.0025f);
+	const float lpf1_coefficientMoment2 = 1.0f - lpf1_coefficientMoment1;
 
-	for (int i = 0; i < 4; i++) {
-		const float cutoff_q1 = (i == 0) ? L1_CUTOFF_Q1_THRUST : L1_CUTOFF_Q1_MOMENT;
-		const float lpf1_keep = expf(-cutoff_q1 * dt);
-		lpf1(i) = lpf1_keep * _state.lpf1_prev(i) + (1.f - lpf1_keep) * sigma_matched(i);
+	Vector4f u_ad_int{};
+	Vector4f u_ad{};
 
-		if (i == 0) {
-			lpf2(i) = lpf1(i);
+	u_ad_int(0) = lpf1_coefficientThrust1 * _lpf1_prev(0) + lpf1_coefficientThrust2 * sigma_m_hat(0);
+	u_ad_int(1) = lpf1_coefficientMoment1 * _lpf1_prev(1) + lpf1_coefficientMoment2 * sigma_m_hat(1);
+	u_ad_int(2) = lpf1_coefficientMoment1 * _lpf1_prev(2) + lpf1_coefficientMoment2 * sigma_m_hat(2);
+	u_ad_int(3) = lpf1_coefficientMoment1 * _lpf1_prev(3) + lpf1_coefficientMoment2 * sigma_m_hat(3);
 
-		} else {
-			lpf2(i) = lpf2_moment_keep * _state.lpf2_prev(i) + (1.f - lpf2_moment_keep) * lpf1(i);
-		}
+	_lpf1_prev = u_ad_int;
 
-		const float adaptive_command = L1_ENABLE
-					       ? math::constrain(-lpf2(i), -ADAPTIVE_LIMITS[i], ADAPTIVE_LIMITS[i])
-					       : 0.f;
-		output.adaptive_thrust_moment[i] = adaptive_command;
-		output.combined_thrust_moment[i] = baseline_thrust_moment(i) + adaptive_command;
-	}
+	const float lpf2_coefficientMoment1 = expf(-_parameters.cutoff_q2_moment * 0.0025f);
+	const float lpf2_coefficientMoment2 = 1.0f - lpf2_coefficientMoment1;
 
-	for (int i = 0; i < 2; i++) {
-		_state.sigma_unmatched_prev(i) =
-			math::constrain(sigma_unmatched(i), -MAX_L1_THRUST_N, MAX_L1_THRUST_N);
-	}
+	u_ad(0) = u_ad_int(0);
+	u_ad(1) = lpf2_coefficientMoment1 * _lpf2_prev(1) + lpf2_coefficientMoment2 * u_ad_int(1);
+	u_ad(2) = lpf2_coefficientMoment1 * _lpf2_prev(2) + lpf2_coefficientMoment2 * u_ad_int(2);
+	u_ad(3) = lpf2_coefficientMoment1 * _lpf2_prev(3) + lpf2_coefficientMoment2 * u_ad_int(3);
 
-	_state.velocity_hat_prev = velocity_hat;
-	_state.velocity_prev = velocity_now;
-	_state.angular_velocity_hat_prev = angular_velocity_hat;
-	_state.angular_velocity_prev = omega_now;
-	_state.rotation_body_to_ned_prev = rotation;
-	_state.baseline_thrust_moment_prev = baseline_thrust_moment;
-	_state.sigma_matched_prev = sigma_matched;
-	_state.lpf1_prev = lpf1;
-	_state.lpf2_prev = lpf2;
+	_lpf2_prev = u_ad;
+	u_ad = -u_ad;
+	_u_ad_prev = u_ad * static_cast<float>(l1enable);
+
+	_v_prev = v_now;
+	_omega_prev = omega_now;
+	_R_prev = R;
+
+	Vector4f thrustMomentCmd{};
 
 	for (int i = 0; i < 4; i++) {
-		_state.adaptive_thrust_moment_prev(i) = output.adaptive_thrust_moment[i];
+		thrustMomentCmd(i) = input.baseline_thrust_moment[i];
 	}
 
-	_state.last_update_us = input.timestamp_us;
+	_u_b_prev = thrustMomentCmd;
+
+	copy4(_u_ad_prev, output.adaptive_thrust_moment);
+	copy3(v_hat, output.velocity_hat);
+	copy3(omega_hat, output.angular_velocity_hat);
+	copy4(sigma_m_hat, output.sigma_matched);
+	copy2(sigma_um_hat, output.sigma_unmatched);
+	copy4(u_ad_int, output.lpf1);
+	copy4(_lpf2_prev, output.lpf2);
 	output.valid = true;
 	return true;
 }
